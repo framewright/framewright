@@ -88,7 +88,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** **Context flows down, results flow up.** Each container boundary transforms time (offset, speed, retime curve), space (each container has its own canvas, and placement is a transform rather than a resample), quality (proxy level, region of interest) and colour context.
 - **[Decided]** **Typed ports:** image, mask, audio (with a channel layout), scene, plus later types such as geometry or text. Connections live in the container's structure, never inside a node's opaque payload.
 - **[Decided]** **Plain clips are cheap.** A clip with no graph is stored compactly as "media → output" and only becomes a real graph when opened.
-- **[Proposed]** (from step 1) Until a container type can lower itself, nested containers and optional inputs stop compilation with a clear "not yet" error that names the node, rather than rendering something wrong.
+- **[Decided]** (from step 1) Until a container type can lower itself, nested containers and optional inputs stop compilation with a clear "not yet" error that names the node, rather than rendering something wrong.
 
 ### 4.1 Node interface
 
@@ -168,7 +168,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** The working space is scene-linear float (ACEScg-style), with premultiplied RGBA16F as the default and RGBA32F where precision needs it. 8-bit exists only at input and output edges.
 - **[Decided]** **Input, working, display and export are separate colour boundaries.** Changing the monitor setup never changes exported bytes.
 - **[Decided]** We write our own colour core (matrices, transfer functions, LUTs as GPU operations) using OCIO-compatible concepts. OCIO configs are scoped to the project and their fingerprint goes into cache keys. The `$OCIO` environment variable is never read. ICC support via `lcms2` for photo and print work.
-- **[Proposed]** (from step 1) The Output node's colour space defaults to **Auto**, meaning the delivery space. A render chooses it from the output file type (EXR: linear Rec.709, PNG: sRGB) at compile time, so it is part of the plan and its cache keys.
+- **[Decided]** (from step 1) The Output node's colour space defaults to **Auto**, meaning the delivery space. A render chooses it from the output file type (EXR: linear Rec.709, PNG: sRGB) at compile time, so it is part of the plan and its cache keys.
 - **Note** (measured in step 1): half-float intermediates passed through a large-coefficient matrix (ACEScg → Rec.709 has entries up to 1.7, with heavy cancellation) and then the sRGB curve's 12.92× linear segment lose about 1–2% on near-zero and negative values. This is the case "RGBA32F where precision needs it" is for. Nothing needs doing yet.
 - **[Decided]** One delivery spec drives both the final pixel transform and the container metadata, so the two can't drift apart.
 
@@ -250,7 +250,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Audio decoding through FFmpeg or `symphonia`, `cpal` for output, `rubato` for resampling. Stream audio; never decode whole files into RAM.
 - **[Decided]** Hardware decode: start with CPU decode plus upload. Zero-copy hardware decode (VA-API or NVDEC into wgpu) later; the old prototype showed it needs wgpu patches.
 - **[Decided]** Bounded export queues with byte accounting, and outputs published atomically.
-- **[Proposed]** (from step 1) **Outputs are byte-reproducible:** the same pixels always give the same file bytes. EXR is written with increasing line order, because the encoder otherwise writes chunks in thread-completion order.
+- **[Decided]** (from step 1) **Outputs are byte-reproducible:** the same pixels always give the same file bytes. EXR is written with increasing line order, because the encoder otherwise writes chunks in thread-completion order.
 
 ## 13. 3D
 
