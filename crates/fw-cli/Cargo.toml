@@ -20,4 +20,5 @@ fw-plugin.workspace = true
 fw-render.workspace = true
 
 [dev-dependencies]
+fw-testmedia.workspace = true
 tempfile.workspace = true

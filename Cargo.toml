@@ -15,6 +15,7 @@ fw-doc = { path = "crates/fw-doc" }
 fw-ops = { path = "crates/fw-ops" }
 fw-compile = { path = "crates/fw-compile" }
 fw-media = { path = "crates/fw-media" }
+fw-testmedia = { path = "crates/fw-testmedia" }
 fw-render = { path = "crates/fw-render" }
 
 blake3 = "1"
@@ -28,5 +29,7 @@ thiserror = "2"
 ulid = { version = "1", features = ["serde"] }
 # naga is only for validating generated shaders in tests; keep it on the same major as wgpu.
 naga = { version = "30", features = ["wgsl-in"] }
+# Development builds link the system FFmpeg (design §12); the private build replaces this later.
+rsmpeg = { version = "0.18", default-features = false, features = ["ffmpeg8", "link_system_ffmpeg"] }
 # Only fw-render may depend on wgpu. The UI toolkit choice decides the major version.
 wgpu = "30"

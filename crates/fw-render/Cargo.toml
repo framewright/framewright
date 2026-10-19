@@ -18,4 +18,5 @@ wgpu.workspace = true
 fw-doc.workspace = true
 fw-media.workspace = true
 fw-ops.workspace = true
+fw-testmedia.workspace = true
 tempfile.workspace = true

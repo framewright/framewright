@@ -118,3 +118,69 @@ fn renders_timelines_at_any_time() {
         out.to_str().unwrap(),
     ]);
 }
+
+/// Saves a one-clip timeline of the test H.264 file and returns its path.
+fn video_project(dir: &Path) -> String {
+    let video = fw_testmedia::h264();
+    let json = format!(
+        r#"{{
+  "format": "framewright.project",
+  "format_version": 1,
+  "root": "00000000000000000000000001",
+  "nodes": {{
+    "00000000000000000000000001": {{
+      "type": "fw.timeline",
+      "version": 1,
+      "name": "Main Timeline",
+      "timeline": {{
+        "width": 320,
+        "height": 180,
+        "rate": "24000/1001",
+        "sample_rate": 48000,
+        "tracks": [{{ "id": "00000000000000000000000002", "kind": "video", "name": "V1" }}],
+        "clips": {{
+          "00000000000000000000000003": {{
+            "track": "00000000000000000000000002",
+            "start": "0",
+            "duration": "4",
+            "source_in": "0",
+            "node": {{
+              "type": "fw.clip",
+              "version": 1,
+              "name": "testsrc",
+              "params": {{ "file": {{ "path": "{}" }} }}
+            }}
+          }}
+        }}
+      }}
+    }}
+  }}
+}}
+"#,
+        video.display()
+    );
+    let path = dir.join("video.json");
+    std::fs::write(&path, json).unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+#[test]
+fn video_frames_render_identically_across_processes() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = video_project(dir.path());
+    let out = |name: &str| dir.path().join(name).to_str().unwrap().to_owned();
+    fw(&["render", &project, "--time", "2.5", "--out", &out("a.exr")]);
+    fw(&["render", &project, "--time", "2.5", "--out", &out("b.exr")]);
+    fw(&["render", &project, "--time", "1", "--out", &out("c.exr")]);
+    let read = |name: &str| std::fs::read(dir.path().join(name)).unwrap();
+    assert!(
+        read("a.exr") == read("b.exr"),
+        "the same frame renders the same bytes"
+    );
+    assert!(
+        read("a.exr") != read("c.exr"),
+        "different moments show different frames"
+    );
+    let plan = fw(&["inspect", &project, "--time", "2.5"]);
+    assert!(plan.contains("frame at"), "{plan}");
+}

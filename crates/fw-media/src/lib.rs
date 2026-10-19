@@ -8,6 +8,9 @@
 //! stills, ICC profiles and PNG colour chunks.
 
 mod project;
+mod video;
+
+pub use video::{VideoInfo, VideoReader, probe_video};
 
 pub use project::ProjectMedia;
 
@@ -17,13 +20,13 @@ use std::path::{Path, PathBuf};
 
 use exr::prelude::{self as exrp, ReadChannels as _, ReadLayers as _, WritableImage as _};
 use fw_core::color::Primaries;
-use fw_core::{ColorSpace, ContentHash, RgbaImage, Transfer};
+use fw_core::{ColorSpace, ContentHash, RgbaImage, Time, Transfer};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MediaError {
     #[error("{path}: {source}")]
     Io { path: PathBuf, source: io::Error },
-    #[error("{path}: unsupported file type (expected .png, .jpg, .jpeg or .exr)")]
+    #[error("{path}: unsupported file type")]
     Unsupported { path: PathBuf },
     #[error("{path}: {message}")]
     Decode { path: PathBuf, message: String },
@@ -36,6 +39,8 @@ pub enum Format {
     Png,
     Jpeg,
     Exr,
+    /// Anything FFmpeg reads as video. Read-only for now.
+    Video,
 }
 
 impl Format {
@@ -45,6 +50,9 @@ impl Format {
             "png" => Some(Format::Png),
             "jpg" | "jpeg" => Some(Format::Jpeg),
             "exr" => Some(Format::Exr),
+            "mov" | "mp4" | "m4v" | "mkv" | "webm" | "mxf" | "avi" | "mts" | "m2ts" => {
+                Some(Format::Video)
+            }
             _ => None,
         }
     }
@@ -53,6 +61,7 @@ impl Format {
     pub fn natural_space(self) -> ColorSpace {
         match self {
             Format::Png | Format::Jpeg => ColorSpace::SRGB,
+            Format::Video => ColorSpace::REC709_DISPLAY,
             Format::Exr => ColorSpace::LINEAR_REC709,
         }
     }
@@ -98,6 +107,10 @@ pub fn probe(path: &Path) -> Result<Probe, MediaError> {
         message,
     };
     let (width, height, space, has_alpha) = match format_of(path)? {
+        Format::Video => {
+            let video = probe_video(path)?;
+            (video.width, video.height, video.space, video.has_alpha)
+        }
         Format::Png | Format::Jpeg => {
             use image::ImageDecoder as _;
             let decoder = image::ImageReader::open(path)
@@ -146,6 +159,11 @@ pub fn read_image(path: &Path) -> Result<(RgbaImage, ColorSpace), MediaError> {
         message,
     };
     match format_of(path)? {
+        Format::Video => {
+            let mut reader = VideoReader::open(path)?;
+            let space = probe_video(path)?.space;
+            Ok((reader.frame(Time::ZERO)?, space))
+        }
         Format::Png | Format::Jpeg => {
             let decoded = image::open(path)
                 .map_err(|e| decode(e.to_string()))?

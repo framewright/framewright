@@ -85,7 +85,7 @@ fn main() -> ExitCode {
 
 fn output_format(out: &Path) -> Result<Format, String> {
     match Format::of(out) {
-        Some(Format::Jpeg) | None => Err(format!(
+        Some(Format::Jpeg | Format::Video) | None => Err(format!(
             "{}: can only write .exr or .png files",
             out.display()
         )),
@@ -133,7 +133,7 @@ fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(
             }
             fw_media::write_png(out, &image, sixteen_bit)
         }
-        Format::Jpeg => unreachable!("rejected by output_format"),
+        Format::Jpeg | Format::Video => unreachable!("rejected by output_format"),
     }
     .map_err(|e| e.to_string())?;
     let written = started.elapsed() - setup - rendered;

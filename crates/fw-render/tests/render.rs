@@ -447,3 +447,85 @@ fn layers_composite_over_each_other_in_linear_light() {
     }
     assert_close(&got, &want, "50% layer over another");
 }
+
+#[test]
+fn video_clips_show_the_frame_for_each_moment() {
+    use fw_doc::{Placement, TimelineSettings, Track, TrackId, TrackKind};
+    let video = fw_testmedia::count_24fps();
+    let mut ids = SequentialIds::new(70);
+    let root = ids.next_id();
+    let (v1, clip) = (TrackId(ids.next_id()), ids.next_id());
+    let settings = TimelineSettings {
+        width: 64,
+        height: 32,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    editor
+        .apply(
+            "Build",
+            vec![
+                Command::AddTrack {
+                    timeline: root,
+                    track: Track {
+                        id: v1,
+                        kind: TrackKind::Video,
+                        name: "V1".into(),
+                    },
+                    index: 0,
+                },
+                // On the timeline from 1 s, showing the source from 0.5 s.
+                Command::AddNode {
+                    parent: root,
+                    id: clip,
+                    type_id: "fw.clip".into(),
+                    name: None,
+                    placement: Some(Placement {
+                        track: v1,
+                        start: Time::from_seconds(1),
+                        duration: Time::from_seconds(1),
+                        source_in: "1/2".parse().unwrap(),
+                        speed: Time::from_seconds(1),
+                    }),
+                },
+                set(
+                    clip,
+                    "file",
+                    ParamValue::Media(MediaRef {
+                        path: video.display().to_string(),
+                    }),
+                ),
+            ],
+        )
+        .unwrap();
+    let media = ProjectMedia::new("/");
+    let mut renderer = Renderer::new(gpu(), DEFAULT_CACHE_BYTES);
+    let level_at = |renderer: &mut Renderer, t: &str| {
+        let plan = compile(
+            editor.doc(),
+            editor.registry(),
+            &media,
+            &Options::at(t.parse().unwrap()),
+        )
+        .unwrap();
+        let img = renderer.render(&plan, &media).unwrap();
+        // Untagged video is treated as Rec.709 on a 2.4 display; output is linear Rec.709.
+        let linear = img.pixel(10, 10)[0] as f64;
+        (linear.powf(1.0 / 2.4) * 255.0).round() as u8
+    };
+    // Timeline 1.25 s → source 0.75 s → frame 18.
+    assert_eq!(level_at(&mut renderer, "1.25"), fw_testmedia::level(18));
+    assert_eq!(level_at(&mut renderer, "1.5"), fw_testmedia::level(24));
+    assert_eq!(level_at(&mut renderer, "1"), fw_testmedia::level(12));
+    let hits = renderer.stats().cache_hits;
+    assert_eq!(level_at(&mut renderer, "1.25"), fw_testmedia::level(18));
+    assert_eq!(
+        renderer.stats().cache_hits,
+        hits + 1,
+        "a frame already shown comes from the cache"
+    );
+}

@@ -1,0 +1,8 @@
+[package]
+name = "fw-testmedia"
+description = "Synthetic test media for Framewright's tests, made with the ffmpeg CLI. Never shipped."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]

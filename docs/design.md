@@ -253,6 +253,12 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 
 - **[Decided]** FFmpeg, as a private, pinned, checksummed LGPL build. The app never uses system FFmpeg. Patent-encumbered components are loaded at runtime. FFmpeg is hidden behind our own media interface and nothing else touches it.
 - **[Decided]** (from step 2) **During development only,** `fw-media` links the system FFmpeg libraries, behind the same interface. The private pinned build becomes its own task, done before anything is distributed.
+- **[Proposed]** (from step 2) **Video decoding details:**
+  - The FFmpeg binding is `rsmpeg`. It links the system FFmpeg now and can link the private build later through environment variables, so no rewrite.
+  - Source time 0 is a video's first frame, whatever the container's own start time.
+  - Frame times come from the container's timestamps. If every timestamp matches the declared rate after the container's rounding (Matroska stores whole milliseconds), the rate is treated as constant and exact; otherwise each frame keeps its exact time.
+  - swscale only unpacks and upsamples chroma. We apply the YUV matrix and range ourselves with exact constants, because swscale's own conversion turns 8-bit white into 0.996. TODO: move this to the GPU and honour chroma siting.
+  - Untagged video is assumed to be Rec.709 primaries on a BT.1886 (2.4 gamma) display, with the Rec.601 matrix below 720 lines.
 - **[Decided]** Images: `image`, `exr` (pure Rust), and `rawler` for RAW, with LibRaw bindings if coverage falls short.
 - **[Decided]** Audio decoding through FFmpeg or `symphonia`, `cpal` for output, `rubato` for resampling. Stream audio; never decode whole files into RAM.
 - **[Decided]** Hardware decode: start with CPU decode plus upload. Zero-copy hardware decode (VA-API or NVDEC into wgpu) later; the old prototype showed it needs wgpu patches.

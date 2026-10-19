@@ -84,7 +84,7 @@ fn fingerprints_follow_content_not_names() {
 #[test]
 fn unknown_types_are_refused() {
     assert!(matches!(
-        probe(std::path::Path::new("clip.mov")),
+        probe(std::path::Path::new("notes.txt")),
         Err(MediaError::Unsupported { .. })
     ));
 }
