@@ -630,3 +630,79 @@ fn gpu_unpacking_matches_the_cpu_reference() {
         }
     }
 }
+
+#[test]
+fn several_video_layers_each_show_their_own_frame() {
+    use fw_doc::{Placement, TimelineSettings, Track, TrackId, TrackKind};
+    // Frame 0 (black) below frame 10 at 50%: two uploads of the same size
+    // in one plan, which must not share textures.
+    let video = fw_testmedia::count_24fps();
+    let mut ids = SequentialIds::new(110);
+    let root = ids.next_id();
+    let settings = TimelineSettings {
+        width: 64,
+        height: 32,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    let mut commands = vec![];
+    for (index, (frame, opacity)) in [(0, 100.0), (10, 50.0)].into_iter().enumerate() {
+        let (track, clip) = (TrackId(ids.next_id()), ids.next_id());
+        commands.extend([
+            Command::AddTrack {
+                timeline: root,
+                track: Track {
+                    id: track,
+                    kind: TrackKind::Video,
+                    name: format!("V{}", index + 1),
+                },
+                index,
+            },
+            Command::AddNode {
+                parent: root,
+                id: clip,
+                type_id: "fw.clip".into(),
+                name: None,
+                placement: Some(Placement {
+                    track,
+                    start: Time::ZERO,
+                    duration: Time::from_seconds(1),
+                    source_in: Time::of_frame(frame, Time::from_seconds(24)).unwrap(),
+                    speed: Time::from_seconds(1),
+                }),
+            },
+            set(
+                clip,
+                "file",
+                ParamValue::Media(MediaRef {
+                    path: video.display().to_string(),
+                }),
+            ),
+            set(clip, "opacity", ParamValue::Float(opacity)),
+        ]);
+    }
+    editor.apply("Build", commands).unwrap();
+    let media = ProjectMedia::new("/");
+    let plan = compile(
+        editor.doc(),
+        editor.registry(),
+        &media,
+        &Options::at(Time::ZERO),
+    )
+    .unwrap();
+    let image = Renderer::new(gpu(), DEFAULT_CACHE_BYTES)
+        .render(&plan, &media)
+        .unwrap();
+    // Untagged video is Rec.709 on a 2.4 display; the output is linear Rec.709.
+    let top = (fw_testmedia::level(10) as f32 / 255.0).powf(2.4);
+    let got = image.pixel(10, 10)[0];
+    assert!(
+        (got - 0.5 * top).abs() < 2e-3,
+        "got {got}, want {} (half of frame 10 over black)",
+        0.5 * top
+    );
+}

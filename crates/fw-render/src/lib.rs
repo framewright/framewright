@@ -69,6 +69,10 @@ pub struct Renderer {
     pipelines: HashMap<ContentHash, wgpu::ComputePipeline>,
     /// Unused textures by size and format, reused instead of reallocated.
     pool: HashMap<(u32, u32, wgpu::TextureFormat), Vec<wgpu::Texture>>,
+    /// Textures whose queued uploads haven't been submitted yet. They return
+    /// to the pool only after the submit: uploads run at the start of the
+    /// next submit, so reusing one within a plan would overwrite it.
+    uploading: Vec<wgpu::Texture>,
     stats: Stats,
 }
 
@@ -166,6 +170,7 @@ impl Renderer {
             cache: RamCache::new(cache_bytes),
             pipelines: HashMap::new(),
             pool: HashMap::new(),
+            uploading: Vec::new(),
             stats: Stats::default(),
         }
     }
@@ -199,6 +204,7 @@ impl Renderer {
         let started = std::time::Instant::now();
         let image = self.read_back(encoder, &output);
         self.stats.readback_time += started.elapsed();
+        self.submitted();
         if let Some(error) = pollster::block_on(scope.pop()) {
             return Err(RenderError::Gpu(error.to_string()));
         }
@@ -222,6 +228,7 @@ impl Renderer {
             .push_error_scope(wgpu::ErrorFilter::Validation);
         let (encoder, texture) = self.encode(plan, decoder)?;
         self.gpu.queue.submit([encoder.finish()]);
+        self.submitted();
         // Lets wgpu free the frame's finished buffers and bind groups.
         let _ = self.gpu.device.poll(wgpu::PollType::Poll);
         if let Some(error) = pollster::block_on(scope.pop()) {
@@ -240,6 +247,8 @@ impl Renderer {
         plan: &Plan,
         decoder: &dyn Decoder,
     ) -> Result<(wgpu::CommandEncoder, wgpu::Texture), RenderError> {
+        // Left over from a plan that failed before its submit.
+        self.submitted();
         let mut textures: HashMap<ImageHandle, wgpu::Texture> = HashMap::new();
         let mut encoder = self
             .gpu
@@ -271,8 +280,15 @@ impl Renderer {
         Ok((encoder, output))
     }
 
-    /// Returns a texture to the pool. Reusing it later is safe: the queue
-    /// runs work in order.
+    /// Returns textures held for uploads to the pool, once their plan is submitted.
+    fn submitted(&mut self) {
+        for texture in std::mem::take(&mut self.uploading) {
+            self.recycle(texture);
+        }
+    }
+
+    /// Returns a texture to the pool. Reusing it in a later submit is safe:
+    /// the queue runs work in order.
     fn recycle(&mut self, texture: wgpu::Texture) {
         self.pool
             .entry((texture.width(), texture.height(), texture.format()))
@@ -444,9 +460,7 @@ impl Renderer {
             &entries,
             (picture.width, picture.height),
         );
-        for plane in planes {
-            self.recycle(plane);
-        }
+        self.uploading.extend(planes);
         output
     }
 

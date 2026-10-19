@@ -27,15 +27,16 @@ release build. Three runs; the range is shown.
 | Workload | Measured | Limit | Result |
 | --- | --- | --- | --- |
 | `probe-cached` | 0.001 ms | 0.050 ms | ok |
-| `compile-frame` | 0.005 ms | 1.000 ms | ok |
-| `decode-next-1080p` | 4.7–6.1 ms | 20.0 ms | ok |
-| `playback-frame-1080p` | 3.0–3.8 ms | 41.7 ms | ok |
-| `playback-composite-1080p` | 7.5–9.3 ms | 41.7 ms | ok |
-| `scrub-1080p` | 146.6–148.0 ms | 150.0 ms | ok, at the limit (earlier runs 142–169 ms) |
-| `audio-block-8-voices` | 0.006–0.010 ms | 0.500 ms | ok |
+| `compile-frame` | 0.004–0.005 ms | 1.000 ms | ok |
+| `decode-next-1080p` | 5.9–6.8 ms | 20.0 ms | ok |
+| `playback-frame-1080p` | 3.8–4.1 ms | 41.7 ms | ok |
+| `playback-composite-1080p` | 8.1–9.7 ms | 41.7 ms | ok |
+| `scrub-1080p` | 148.4–152.9 ms | 150.0 ms | **at the limit**: missed in one run of three (earlier runs 142–169 ms) |
+| `audio-block-8-voices` | 0.006–0.012 ms | 0.500 ms | ok |
 
 On llvmpipe (software Vulkan, sharing the CPU with decoding), single-layer
-playback is 14.9 ms and the three-layer composite 44.5 ms, over budget.
+playback is 16.1 ms and the three-layer composite 50.3 ms, over budget.
+Budgets are set for a real GPU.
 
 ### Before and after the optimisation pass
 
