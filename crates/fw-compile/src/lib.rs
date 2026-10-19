@@ -54,8 +54,9 @@ pub trait MediaResolver {
 /// Decodes the file a load step names, for the renderer. Kept beside
 /// [`MediaResolver`] so one media adapter can serve both.
 pub trait Decoder {
-    /// Straight-alpha pixels, `load.width` × `load.height`.
-    fn decode(&self, load: &LoadStep) -> Result<fw_core::RgbaImage, String>;
+    /// The picture, `load.width` × `load.height`: straight-alpha RGBA, or
+    /// planes for the renderer to convert.
+    fn decode(&self, load: &LoadStep) -> Result<fw_core::DecodedImage, String>;
 }
 
 #[derive(Debug, Clone)]

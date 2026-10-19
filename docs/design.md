@@ -186,6 +186,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Evaluation is deterministic, and the cache is keyed by a content hash (`blake3`) of each node's inputs and parameters. Never hash the whole project, and never build keys from `Debug` output (both were old-prototype bugs).
 - **[Decided]** A memory-pressure ladder: lower preview quality first, never export quality.
 - **[Decided]** There is **one** engine. There is no full duplicate CPU reference implementation of every effect; correctness comes from golden-image tests.
+- **[Proposed]** (from the optimisation pass) **Showing a frame never reads it back.** `Renderer::render_gpu` leaves the frame in a GPU texture and returns once the work is queued. Playback holds these textures; its `FrameSource` is generic over the frame type, so its tests still use small CPU images. `Renderer::render` reads back, for `fw render`, export and tests. Budgets that time a frame wait until the GPU has finished it.
 
 ## 8. Audio
 
@@ -265,8 +266,16 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - The FFmpeg binding is `rsmpeg`. It links the system FFmpeg now and can link the private build later through environment variables, so no rewrite.
   - Source time 0 is a video's first frame, whatever the container's own start time.
   - Frame times come from the container's timestamps. If every timestamp matches the declared rate after the container's rounding (Matroska stores whole milliseconds), the rate is treated as constant and exact; otherwise each frame keeps its exact time.
-  - swscale only unpacks and upsamples chroma. We apply the YUV matrix and range ourselves with exact constants, because swscale's own conversion turns 8-bit white into 0.996. TODO: move this to the GPU and honour chroma siting.
+  - swscale only unpacks and upsamples chroma. We apply the YUV matrix and range ourselves with exact constants, because swscale's own conversion turns 8-bit white into 0.996. (Superseded by the planar proposal below if it's approved.)
   - Untagged video is assumed to be Rec.709 primaries on a BT.1886 (2.4 gamma) display, with the Rec.601 matrix below 720 lines.
+- **[Proposed]** (from the optimisation pass) **Decoded video stays as planes until the GPU:**
+  - The decoder hands over the planes of integer codes as FFmpeg decoded them: any planar YUV or RGB format, 8 to 16 bits, any chroma subsampling. Other formats (packed RGB, big-endian, …) are unpacked by swscale to 16-bit planes first. Each picture carries its own encoding (matrix, range, bit depth, subsampling, chroma siting), read from the frame's tags.
+  - A GPU kernel turns the planes into premultiplied RGBA16F before the plan's kernels run. It reads codes exactly from integer textures and uses the same constants as the CPU reference (`PlanarImage::to_rgba`), and tests compare the two on real clips.
+  - Chroma is upsampled bilinearly and honours siting (untagged means the MPEG-2/H.264 default: co-sited horizontally, centred vertically). That differs slightly from swscale's bicubic on detailed chroma; flat colours stay exact.
+  - The conversion is its own dispatch rather than fused into the plan's first kernel: the picture describes itself when decoded, so the plan never needs to know pixel formats, and the extra pass costs about 0.1 ms at 1080p. Fusing stays possible.
+  - The RAM cache holds decoded planes: 3 MB for a 1080p 4:2:0 8-bit frame, against 33 MB as `f32` RGBA.
+- **[Proposed]** (from the optimisation pass) **Decoding speed:** FFmpeg decodes with frame and slice threads, as many as there are cores. The probe records keyframes, and a reader seeks when landing on a keyframe beats decoding forward (a seek counts as 0.25 s of decoding). Each clip keeps its own reader, up to four per file, so a file used twice on a timeline doesn't seek on every frame.
+- **[Open]** Hardware decoding through FFmpeg (VA-API, NVDEC), downloading frames into the same planar path, as a step before zero-copy. Scrubbing camera-like long-GOP footage is bound by CPU decoding: a 50 Mbit/s keyframe decodes on one thread in about 50 ms, then about 2.6 ms per frame. It needs two-plane formats (NV12, P010) in the unpack kernel.
 - **[Decided]** Images: `image`, `exr` (pure Rust), and `rawler` for RAW, with LibRaw bindings if coverage falls short.
 - **[Decided]** Audio decoding through FFmpeg or `symphonia`, `cpal` for output, `rubato` for resampling. Stream audio; never decode whole files into RAM.
 - **[Decided]** Hardware decode: start with CPU decode plus upload. Zero-copy hardware decode (VA-API or NVDEC into wgpu) later; the old prototype showed it needs wgpu patches.
@@ -310,6 +319,8 @@ fw-bench     benchmark harness and performance budgets
 3. The UI shell in the Studio style (after the toolkit bake-off): viewer, parameter editing, undo, frame cache.
 4. Shader-node plugins, to prove early that built-ins use the plugin API.
 5. Then widen: LayerStack and Photo documents, masks, text, mixer, 3D.
+
+**[Proposed]** (from the optimisation pass) The benchmark clip decodes like camera footage: grain at 50 Mbit/s with 2 s keyframe groups, because the clean test pattern decoded about five times faster than real footage would. A second playback workload blends three layers decoded from three places in one file.
 
 **[Decided]** Process guardrails: a performance budget table (`docs/performance.md`, measured by `fw-bench`) (named workload, statistic, limit), synthetic test media generated with FFmpeg, no benchmark or qualification code in the shipping binary, no files over about 1.5k lines, plain names rather than invented subsystem names, and `TODO` rather than euphemisms like "forthcoming".
 

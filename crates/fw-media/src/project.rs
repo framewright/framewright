@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use fw_compile::{Decoder, LoadStep, MediaInfo, MediaResolver};
-use fw_core::RgbaImage;
+use fw_core::{DecodedImage, NodeId};
 use fw_plugin::MediaRef;
 
 use crate::{Format, VideoInfo, VideoReader, has_audio, probe_video};
@@ -15,15 +15,27 @@ use crate::{Format, VideoInfo, VideoReader, has_audio, probe_video};
 pub struct ProjectMedia {
     base: PathBuf,
     /// Open video readers by file, so the next frame continues decoding
-    /// instead of reopening and seeking.
-    /// TODO: bound how many stay open.
-    readers: Mutex<HashMap<PathBuf, VideoReader>>,
+    /// instead of reopening and seeking. A file used at several places at
+    /// once (the same clip on two tracks) gets a reader for each.
+    /// TODO: bound how many files stay open.
+    readers: Mutex<HashMap<PathBuf, Vec<Reader>>>,
     /// What each file was found to hold, so compiling a frame never reads a
     /// file again. Entries are trusted while size and modification time match.
     /// TODO: keep this on disk alongside the cache (design §4.3).
     probes: Mutex<HashMap<PathBuf, Probed>>,
     /// How many times a file was actually read to probe it. For tests.
     probe_reads: AtomicUsize,
+}
+
+/// Readers kept open per file, at most.
+const READERS_PER_FILE: usize = 4;
+
+struct Reader {
+    reader: VideoReader,
+    /// The node it last decoded for.
+    node: Option<NodeId>,
+    /// When it was last used, for replacing the least recently used.
+    used: u64,
 }
 
 #[derive(Clone)]
@@ -149,10 +161,10 @@ impl MediaResolver for ProjectMedia {
 }
 
 impl Decoder for ProjectMedia {
-    fn decode(&self, load: &LoadStep) -> Result<RgbaImage, String> {
+    fn decode(&self, load: &LoadStep) -> Result<DecodedImage, String> {
         let Some(frame) = load.frame else {
             return crate::read_image(&load.path)
-                .map(|(image, _)| image)
+                .map(|(image, _)| DecodedImage::Rgba(image))
                 .map_err(|e| e.to_string());
         };
         let video = self
@@ -160,11 +172,48 @@ impl Decoder for ProjectMedia {
             .video
             .ok_or_else(|| format!("{} is not a video", load.path.display()))?;
         let mut readers = self.readers.lock().unwrap_or_else(|e| e.into_inner());
-        if !readers.contains_key(&load.path) {
-            let reader = VideoReader::open_probed(&load.path, &video).map_err(|e| e.to_string())?;
-            readers.insert(load.path.clone(), reader);
-        }
-        let reader = readers.get_mut(&load.path).expect("just inserted");
-        reader.frame(frame).map_err(|e| e.to_string())
+        let readers = readers.entry(load.path.clone()).or_default();
+        let used = readers.iter().map(|r| r.used).max().unwrap_or(0) + 1;
+        // The reader that gets there by decoding least; failing that the
+        // node's own reader, which will seek; failing that a new one, or the
+        // least recently used one.
+        let nearest = readers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| r.reader.distance_to(frame).map(|d| (d, i)))
+            .min()
+            .map(|(_, i)| i);
+        let own = readers
+            .iter()
+            .position(|r| load.node.is_some() && r.node == load.node);
+        let index = match nearest.or(own) {
+            Some(i) => i,
+            None if readers.len() < READERS_PER_FILE => {
+                let reader =
+                    VideoReader::open_probed(&load.path, &video).map_err(|e| e.to_string())?;
+                readers.push(Reader {
+                    reader,
+                    node: load.node,
+                    used,
+                });
+                readers.len() - 1
+            }
+            None => {
+                let (i, _) = readers
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, r)| r.used)
+                    .expect("readers is full");
+                i
+            }
+        };
+        let reader = &mut readers[index];
+        reader.used = used;
+        reader.node = load.node;
+        reader
+            .reader
+            .frame(frame)
+            .map(DecodedImage::Planar)
+            .map_err(|e| e.to_string())
     }
 }

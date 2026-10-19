@@ -79,21 +79,28 @@ const BUDGETS: &[Budget] = &[
     },
     Budget {
         name: "decode-next-1080p",
-        what: "Decode the next frame of 1080p H.264 to RGBA",
+        what: "Decode the next frame of 1080p H.264, ready to upload",
         statistic: Statistic::P95,
         limit: ms(20.0),
         run: decode_next,
     },
     Budget {
         name: "playback-frame-1080p",
-        what: "Compile, decode, render and read back the next 1080p frame",
+        what: "Compile, decode and render the next 1080p frame, until the GPU has finished it",
         statistic: Statistic::P95,
         limit: ms(41.7),
         run: playback_frame,
     },
     Budget {
+        name: "playback-composite-1080p",
+        what: "The same, blending three layers decoded from three places in one file",
+        statistic: Statistic::P95,
+        limit: ms(41.7),
+        run: playback_composite,
+    },
+    Budget {
         name: "scrub-1080p",
-        what: "Show a random 1080p frame (seek, decode, render)",
+        what: "Render a random 1080p frame (seek, decode, render, GPU finished)",
         statistic: Statistic::P95,
         limit: ms(150.0),
         run: scrub,
@@ -107,39 +114,87 @@ const BUDGETS: &[Budget] = &[
     },
 ];
 
-/// A 1080p timeline with the test clip on three video tracks and eight audio
-/// tracks, shared by the workloads.
+/// 1080p timelines of the test clip shared by the workloads:
+///
+/// - `editor`: three video tracks and eight audio tracks, all from the start
+///   of the clip. The top layer covers the others, so one layer is rendered.
+/// - `composite`: three video tracks from 0, 3 and 6 s into the clip, the
+///   top two at 50%, so all three are decoded and blended.
 struct Fixture {
     editor: Editor,
+    composite: Editor,
     folder: &'static Path,
     rate: Time,
 }
 
+/// A video clip on its own track: where in the source it starts, and its opacity.
+struct Layer {
+    source_in: Time,
+    opacity: f64,
+}
+
 impl Fixture {
     fn new() -> Fixture {
-        let clip_path = fw_testmedia::hd_h264();
-        let mut ids = SequentialIds::new(1);
-        let root = ids.next_id();
         let rate: Time = "24000/1001".parse().unwrap();
-        let settings = TimelineSettings {
-            width: 1920,
-            height: 1080,
-            rate,
-            sample_rate: 48000,
+        let full = || Layer {
+            source_in: Time::ZERO,
+            opacity: 100.0,
         };
-        let mut editor = Editor::new(
-            Document::new_timeline(root, settings),
-            Arc::new(fw_ops::builtin_registry()),
-        );
-        let mut commands = vec![];
-        for (index, kind) in [TrackKind::Video; 3]
-            .into_iter()
-            .chain([TrackKind::Audio; 8])
-            .enumerate()
-        {
-            let track = TrackId(ids.next_id());
-            let clip = ids.next_id();
-            commands.push(Command::AddTrack {
+        let composite = [(0, 100.0), (3, 50.0), (6, 50.0)].map(|(s, opacity)| Layer {
+            source_in: Time::from_seconds(s),
+            opacity,
+        });
+        Fixture {
+            editor: timeline(rate, &[full(), full(), full()], 8),
+            composite: timeline(rate, &composite, 0),
+            folder: Path::new("/"),
+            rate,
+        }
+    }
+
+    fn frames(&self, editor: &Editor) -> DocumentFrames {
+        DocumentFrames {
+            doc: editor.doc().clone(),
+            registry: editor.registry().clone(),
+            media: ProjectMedia::new(self.folder),
+            renderer: Renderer::new(Arc::new(Gpu::new().expect("a GPU")), DEFAULT_CACHE_BYTES),
+            rate: self.rate,
+            options: Options::at(Time::ZERO),
+        }
+    }
+}
+
+/// Video layers bottom to top, then `audio` audio tracks, each holding the
+/// test clip from its `source_in` to its end. The clip is 10 s long.
+fn timeline(rate: Time, layers: &[Layer], audio: usize) -> Editor {
+    let clip_path = fw_testmedia::hd_h264();
+    let mut ids = SequentialIds::new(1);
+    let root = ids.next_id();
+    let settings = TimelineSettings {
+        width: 1920,
+        height: 1080,
+        rate,
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    let mut commands = vec![];
+    let tracks = layers
+        .iter()
+        .map(|l| (TrackKind::Video, l.source_in, l.opacity))
+        .chain((0..audio).map(|_| (TrackKind::Audio, Time::ZERO, 100.0)));
+    for (index, (kind, source_in, opacity)) in tracks.enumerate() {
+        let track = TrackId(ids.next_id());
+        let clip = ids.next_id();
+        let set = |param: &str, value| Command::SetParam {
+            node: clip,
+            param: param.into(),
+            value: Some(Param::Constant(value)),
+        };
+        commands.extend([
+            Command::AddTrack {
                 timeline: root,
                 track: Track {
                     id: track,
@@ -147,8 +202,8 @@ impl Fixture {
                     name: format!("T{index}"),
                 },
                 index,
-            });
-            commands.push(Command::AddNode {
+            },
+            Command::AddNode {
                 parent: root,
                 id: clip,
                 type_id: "fw.clip".into(),
@@ -156,37 +211,22 @@ impl Fixture {
                 placement: Some(Placement {
                     track,
                     start: Time::ZERO,
-                    duration: Time::from_seconds(10),
-                    source_in: Time::ZERO,
+                    duration: Time::from_seconds(10).checked_sub(source_in).unwrap(),
+                    source_in,
                     speed: Time::from_seconds(1),
                 }),
-            });
-            commands.push(Command::SetParam {
-                node: clip,
-                param: "file".into(),
-                value: Some(Param::Constant(ParamValue::Media(MediaRef {
+            },
+            set(
+                "file",
+                ParamValue::Media(MediaRef {
                     path: clip_path.display().to_string(),
-                }))),
-            });
-        }
-        editor.apply("Bench timeline", commands).unwrap();
-        Fixture {
-            editor,
-            folder: Path::new("/"),
-            rate,
-        }
+                }),
+            ),
+            set("opacity", ParamValue::Float(opacity)),
+        ]);
     }
-
-    fn frames(&self) -> DocumentFrames {
-        DocumentFrames {
-            doc: self.editor.doc().clone(),
-            registry: self.editor.registry().clone(),
-            media: ProjectMedia::new(self.folder),
-            renderer: Renderer::new(Arc::new(Gpu::new().expect("a GPU")), DEFAULT_CACHE_BYTES),
-            rate: self.rate,
-            options: Options::at(Time::ZERO),
-        }
-    }
+    editor.apply("Bench timeline", commands).unwrap();
+    editor
 }
 
 fn time<T>(f: impl FnOnce() -> T) -> Duration {
@@ -229,33 +269,52 @@ fn decode_next(f: &Fixture) -> Vec<Duration> {
         .collect()
 }
 
+/// Renders a frame and waits for the GPU to finish it, which showing it
+/// would. Returns how long the wait was.
+fn render_frame(frames: &mut DocumentFrames, index: i64) -> Duration {
+    std::hint::black_box(frames.frame(index).unwrap());
+    let waited = Instant::now();
+    frames.renderer.gpu().wait();
+    waited.elapsed()
+}
+
 fn playback_frame(f: &Fixture) -> Vec<Duration> {
-    let mut frames = f.frames();
-    frames.frame(0).unwrap();
+    playback(f, &f.editor)
+}
+
+fn playback_composite(f: &Fixture) -> Vec<Duration> {
+    playback(f, &f.composite)
+}
+
+fn playback(f: &Fixture, editor: &Editor) -> Vec<Duration> {
+    let mut frames = f.frames(editor);
+    render_frame(&mut frames, 0);
     let before = frames.renderer.stats().clone();
-    let samples: Vec<Duration> = (1..120)
-        .map(|i| time(|| frames.frame(i).unwrap()))
+    let mut gpu = Duration::ZERO;
+    // The composite's shortest layer lasts 4 s.
+    let samples: Vec<Duration> = (1..90)
+        .map(|i| time(|| gpu += render_frame(&mut frames, i)))
         .collect();
     let after = frames.renderer.stats();
-    let per = |a: Duration, b: Duration| format_ms((a - b) / samples.len() as u32);
+    let per = |d: Duration| format_ms(d / samples.len() as u32);
     eprintln!(
-        "  per frame: decode {}, convert + upload {}, GPU + read back {}",
-        per(after.decode_time, before.decode_time),
-        per(after.upload_time, before.upload_time),
-        per(after.readback_time, before.readback_time),
+        "  per frame: decode {}, upload {}, waiting for the GPU {}",
+        per(after.decode_time - before.decode_time),
+        per(after.upload_time - before.upload_time),
+        per(gpu),
     );
     samples
 }
 
 fn scrub(f: &Fixture) -> Vec<Duration> {
-    let mut frames = f.frames();
-    frames.frame(0).unwrap();
+    let mut frames = f.frames(&f.editor);
+    render_frame(&mut frames, 0);
     // A fixed, scattered order, so runs are comparable.
     let mut index = 17i64;
     (0..30)
         .map(|_| {
             index = (index * 97 + 31) % 239;
-            time(|| frames.frame(index).unwrap())
+            time(|| render_frame(&mut frames, index))
         })
         .collect()
 }

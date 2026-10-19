@@ -15,6 +15,8 @@ struct Counting {
 }
 
 impl FrameSource for Counting {
+    type Frame = Arc<RgbaImage>;
+
     fn frame(&mut self, index: i64) -> Result<Arc<RgbaImage>, String> {
         std::thread::sleep(self.delay);
         self.rendered.fetch_add(1, Ordering::Relaxed);
@@ -28,7 +30,7 @@ fn t(s: &str) -> Time {
     s.parse().unwrap()
 }
 
-fn player(delay_ms: u64) -> (Player, Arc<FakeClock>, Arc<AtomicU64>) {
+fn player(delay_ms: u64) -> (Player<Arc<RgbaImage>>, Arc<FakeClock>, Arc<AtomicU64>) {
     let clock = Arc::new(FakeClock::new(Time::ZERO));
     let rendered = Arc::new(AtomicU64::new(0));
     let source = Counting {

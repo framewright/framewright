@@ -605,6 +605,10 @@ impl PlanBuilder for NodeBuilder<'_, '_> {
                 height: found.height,
                 region,
                 frame,
+                node: match &self.origin {
+                    Origin::Node { node, .. } => Some(*node),
+                    _ => None,
+                },
             }),
             info,
             key,

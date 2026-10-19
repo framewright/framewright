@@ -147,6 +147,9 @@ pub struct LoadStep {
     pub region: Rect,
     /// For video, the start time of the frame to decode; `None` for a still.
     pub frame: Option<fw_core::Time>,
+    /// The node that loads it. Not part of the key: decoders use it to keep
+    /// one reader per use of a file, so two clips of a file don't fight.
+    pub node: Option<NodeId>,
 }
 
 /// An image of one colour, e.g. the transparent black of a timeline gap.

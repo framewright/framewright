@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use fw_compile::FrameTimes;
 use fw_core::color::Primaries;
-use fw_core::{ColorSpace, RgbaImage, Time, Transfer};
+use fw_core::planar::{PlanarEncoding, PlanarModel, Plane, Siting, YuvMatrix, YuvRange};
+use fw_core::{ColorSpace, PlanarImage, Time, Transfer};
 use rsmpeg::avcodec::AVCodecContext;
 use rsmpeg::avformat::AVFormatContextInput;
 use rsmpeg::avutil::AVFrame;
@@ -30,6 +31,8 @@ pub struct VideoInfo {
     pub has_alpha: bool,
     /// The first frame's timestamp in stream ticks: source time 0.
     pub first_pts: i64,
+    /// Timestamps of the keyframes, where decoding can start, in order.
+    pub keyframes: Vec<i64>,
     /// Seconds per timestamp tick.
     pub tick: Time,
 }
@@ -77,6 +80,7 @@ pub fn probe_video(path: &Path) -> Result<VideoInfo, MediaError> {
         (s.codecpar().clone(), s.time_base, s.avg_frame_rate)
     };
     let mut pts = vec![];
+    let mut keyframes = vec![];
     while let Some(packet) = input.read_packet().map_err(|e| err(e.to_string()))? {
         if packet.stream_index as usize != stream {
             continue;
@@ -88,8 +92,12 @@ pub fn probe_video(path: &Path) -> Result<VideoInfo, MediaError> {
         };
         if t != ffi::AV_NOPTS_VALUE {
             pts.push(t);
+            if packet.flags & ffi::AV_PKT_FLAG_KEY as i32 != 0 {
+                keyframes.push(t);
+            }
         }
     }
+    keyframes.sort_unstable();
     pts.sort_unstable();
     pts.dedup();
     let first = *pts.first().ok_or_else(|| err("no frames".into()))?;
@@ -126,6 +134,7 @@ pub fn probe_video(path: &Path) -> Result<VideoInfo, MediaError> {
         space: tagged_space(par.color_primaries, par.color_trc),
         has_alpha: has_alpha(par.format),
         first_pts: first,
+        keyframes,
         tick,
     })
 }
@@ -190,6 +199,7 @@ pub struct VideoReader {
     /// Seconds per timestamp tick.
     tick: Time,
     first_pts: i64,
+    keyframes: Vec<i64>,
     /// The most recently decoded frame, kept so asking for it again is free.
     held: Option<AVFrame>,
     /// The demuxer has run out and the decoder has been told to drain.
@@ -197,8 +207,13 @@ pub struct VideoReader {
     scaler: Option<(i32, SwsContext)>,
 }
 
-/// Decoding forward this far (in seconds) is assumed cheaper than seeking.
-const FORWARD_LIMIT: i64 = 2;
+/// Without keyframe timestamps, decoding forward this far (in seconds) is
+/// assumed cheaper than seeking.
+const FORWARD_LIMIT: f64 = 2.0;
+
+/// What seeking costs (flushing and refilling the decoder's threads), as
+/// seconds of decoding forward.
+const SEEK_COST: f64 = 0.25;
 
 impl VideoReader {
     pub fn open(path: &Path) -> Result<VideoReader, MediaError> {
@@ -220,7 +235,11 @@ impl VideoReader {
         decoder
             .apply_codecpar(&par)
             .map_err(|e| err(e.to_string()))?;
-        decoder.open(None).map_err(|e| err(e.to_string()))?;
+        // As many threads as there are cores, by frame and by slice.
+        let threads = rsmpeg::avutil::AVDictionary::new(c"threads", c"auto", 0);
+        decoder
+            .open(Some(threads))
+            .map_err(|e| err(e.to_string()))?;
         Ok(VideoReader {
             path: path.to_owned(),
             input,
@@ -229,6 +248,7 @@ impl VideoReader {
             tick: Time::new(time_base.num as i64, time_base.den as i64)
                 .map_err(|e| err(e.to_string()))?,
             first_pts,
+            keyframes: info.keyframes.clone(),
             held: None,
             draining: false,
             scaler: None,
@@ -236,10 +256,46 @@ impl VideoReader {
     }
 
     /// The frame starting at source time `at` (a time from the frame index),
-    /// as straight-alpha RGBA in the stream's own encoding.
-    pub fn frame(&mut self, at: Time) -> Result<RgbaImage, MediaError> {
+    /// as decoded planes; [`PlanarImage::to_rgba`] makes straight-alpha RGBA
+    /// in the stream's own encoding.
+    pub fn frame(&mut self, at: Time) -> Result<PlanarImage, MediaError> {
         let err = decode_error(&self.path);
-        // To the nearest tick, as muxers round when they store timestamps.
+        let target = self.target(at)?;
+        let current = self.held.as_ref().map(|f| f.best_effort_timestamp);
+        if current == Some(target) {
+            return self.picture_held();
+        }
+        if self.must_seek(target) {
+            self.seek(target)?;
+        }
+        loop {
+            let Some(frame) = self.next_frame()? else {
+                // Past the end: the last frame holds.
+                return match self.held {
+                    Some(_) => self.picture_held(),
+                    None => Err(err("no frame decoded".into())),
+                };
+            };
+            let pts = frame.best_effort_timestamp;
+            self.held = Some(frame);
+            if pts >= target {
+                return self.picture_held();
+            }
+        }
+    }
+
+    /// How far reaching the frame at `at` would take, in timestamp ticks:
+    /// 0 when it's the frame held, `None` when it means seeking.
+    pub fn distance_to(&self, at: Time) -> Option<i64> {
+        let target = self.target(at).ok()?;
+        let current = self.held.as_ref()?.best_effort_timestamp;
+        (!self.must_seek(target)).then(|| target - current)
+    }
+
+    /// The timestamp of the frame at source time `at`, to the nearest tick,
+    /// as muxers round when they store timestamps.
+    fn target(&self, at: Time) -> Result<i64, MediaError> {
+        let err = decode_error(&self.path);
         let per_second = Time::from_seconds(1)
             .checked_div(self.tick)
             .map_err(|e| err(e.to_string()))?;
@@ -251,32 +307,26 @@ impl VideoReader {
             .checked_add(half_tick)
             .and_then(|t| t.frame_index(per_second))
             .map_err(|e| err(e.to_string()))?;
-        let target = self.first_pts + ticks;
-        let forward_limit = FORWARD_LIMIT * self.tick.den() / self.tick.num().max(1);
-        let current = self.held.as_ref().map(|f| f.best_effort_timestamp);
-        let must_seek = match current {
-            Some(p) => target < p || target - p > forward_limit,
-            None => target - self.first_pts > forward_limit,
+        Ok(self.first_pts + ticks)
+    }
+
+    /// Whether seeking reaches `target` sooner than decoding on from the
+    /// frame held (or from the start, when nothing has been decoded).
+    fn must_seek(&self, target: i64) -> bool {
+        let from = match self.held.as_ref() {
+            Some(frame) => frame.best_effort_timestamp,
+            None => self.first_pts,
         };
-        if current == Some(target) {
-            return self.convert_held();
+        if target < from {
+            return true;
         }
-        if must_seek {
-            self.seek(target)?;
-        }
-        loop {
-            let Some(frame) = self.next_frame()? else {
-                // Past the end: the last frame holds.
-                return match self.held {
-                    Some(_) => self.convert_held(),
-                    None => Err(err("no frame decoded".into())),
-                };
-            };
-            let pts = frame.best_effort_timestamp;
-            self.held = Some(frame);
-            if pts >= target {
-                return self.convert_held();
-            }
+        let ticks_per = |seconds: f64| (seconds / self.tick.as_f64()).round() as i64;
+        // The last keyframe at or before the target, where a seek lands.
+        let landing = self.keyframes.partition_point(|&k| k <= target);
+        match landing.checked_sub(1).map(|i| self.keyframes[i]) {
+            Some(key) => key > from && target - from > target - key + ticks_per(SEEK_COST),
+            None if self.keyframes.is_empty() => target - from > ticks_per(FORWARD_LIMIT),
+            None => false,
         }
     }
 
@@ -323,18 +373,57 @@ impl VideoReader {
         }
     }
 
-    /// Converts the held frame to straight RGBA in the stream's encoding.
+    /// The held frame's planes, as decoded.
     ///
-    /// swscale only unpacks: YUV to 16-bit 4:4:4 YUV, RGB to 16-bit planar
-    /// RGB. Both widen by shifting, which is the convention for YUV (16-bit
-    /// video black is 16 × 256) but not for full-range values, so the matrix,
-    /// range and scaling are applied here with exact constants.
-    ///
-    /// TODO: do this on the GPU, and honour chroma siting.
-    fn convert_held(&mut self) -> Result<RgbaImage, MediaError> {
+    /// Planar formats are copied as they are. Anything else (packed RGB,
+    /// big-endian, …) is unpacked by swscale to 16-bit 4:4:4 YUV or planar
+    /// RGB. swscale widens by shifting, which the encoding's `shift` records,
+    /// except alpha, whose bits it repeats (128 → 32896) so all 16 are used.
+    fn picture_held(&mut self) -> Result<PlanarImage, MediaError> {
         let err = decode_error(&self.path);
         let frame = self.held.as_ref().expect("a frame is held");
         let (w, h, format) = (frame.width, frame.height, frame.format);
+        if let Some(layout) = native_layout(format) {
+            let encoding = encoding_of(frame, &layout, 0);
+            let bytes = encoding.bytes_per_sample() as usize;
+            let planes = layout
+                .planes
+                .iter()
+                .enumerate()
+                .map(|(c, &p)| {
+                    let (sx, sy) = if layout.chroma(c) {
+                        encoding.chroma_shift
+                    } else {
+                        (0, 0)
+                    };
+                    // Rounding up, as FFmpeg sizes chroma planes.
+                    let (pw, ph) = ((w + (1 << sx) - 1) >> sx, (h + (1 << sy) - 1) >> sy);
+                    let row = pw as usize * bytes;
+                    let mut data = Vec::with_capacity(row * ph as usize);
+                    for y in 0..ph as isize {
+                        // SAFETY: FFmpeg gives each plane `ph` rows of at least
+                        // `row` bytes, `linesize` apart.
+                        data.extend_from_slice(unsafe {
+                            std::slice::from_raw_parts(
+                                frame.data[p].offset(y * frame.linesize[p] as isize),
+                                row,
+                            )
+                        });
+                    }
+                    Plane {
+                        width: pw as u32,
+                        height: ph as u32,
+                        data,
+                    }
+                })
+                .collect();
+            return Ok(PlanarImage {
+                width: w as u32,
+                height: h as u32,
+                encoding,
+                planes,
+            });
+        }
         let rgb_source = is_rgb(format);
         let out_format = if rgb_source {
             ffi::AV_PIX_FMT_GBRAP16LE
@@ -353,10 +442,9 @@ impl VideoReader {
             self.scaler = Some((format, scaler));
         }
         let (_, scaler) = self.scaler.as_mut().expect("just set");
-        let plane = w as usize * h as usize;
-        let mut planes = vec![0u16; plane * 4];
-        let base = planes.as_mut_ptr() as *mut u8;
-        let dst = unsafe { [0, 1, 2, 3].map(|i| base.add(i * plane * 2)) };
+        let plane = w as usize * h as usize * 2;
+        let mut planes = vec![vec![0u8; plane]; 4];
+        let dst = [0, 1, 2, 3].map(|i| planes[i].as_mut_ptr());
         let stride = [w * 2; 4];
         unsafe {
             scaler
@@ -370,53 +458,135 @@ impl VideoReader {
                 )
                 .map_err(|e| err(e.to_string()))?;
         }
-        let bits = depth(format).clamp(1, 16);
-        // The widened value of the source's largest code.
-        let full_scale = (((1u32 << bits) - 1) << (16 - bits)) as f32;
-        // swscale widens alpha by repeating bits (128 → 32896), unlike colour.
-        let alpha_scale = 65535.0;
-        let [p0, p1, p2, p3] = [0, 1, 2, 3].map(|i| &planes[i * plane..(i + 1) * plane]);
-        let mut pixels = Vec::with_capacity(plane * 4);
         if rgb_source {
-            // Planes are G, B, R, A.
-            for i in 0..plane {
-                pixels.extend([p2[i], p0[i], p1[i]].map(|v| v as f32 / full_scale));
-                pixels.push(p3[i] as f32 / alpha_scale);
-            }
-        } else {
-            let (kr, kb) = match frame.colorspace {
-                ffi::AVCOL_SPC_BT470BG | ffi::AVCOL_SPC_SMPTE170M => (0.299, 0.114),
-                ffi::AVCOL_SPC_BT2020_NCL | ffi::AVCOL_SPC_BT2020_CL => (0.2627, 0.0593),
-                ffi::AVCOL_SPC_BT709 => (0.2126, 0.0722),
-                // Untagged: standard definition is usually Rec.601, HD Rec.709.
-                _ if h < 720 => (0.299, 0.114),
-                _ => (0.2126, 0.0722),
-            };
-            let kg = 1.0 - kr - kb;
-            let shift = (1u32 << (16 - bits)) as f32;
-            let (y_black, y_range, c_range) = if frame.color_range == ffi::AVCOL_RANGE_JPEG {
-                (0.0, full_scale, full_scale)
-            } else {
-                // Limited range in n-bit codes: luma 16–235, chroma 16–240, scaled to n bits.
-                let unit = (1u32 << (bits - 8)) as f32 * shift;
-                (16.0 * unit, 219.0 * unit, 224.0 * unit)
-            };
-            let c_mid = 32768.0;
-            for i in 0..plane {
-                let y = (p0[i] as f32 - y_black) / y_range;
-                let cb = (p1[i] as f32 - c_mid) / c_range;
-                let cr = (p2[i] as f32 - c_mid) / c_range;
-                let r = y + 2.0 * (1.0 - kr) * cr;
-                let b = y + 2.0 * (1.0 - kb) * cb;
-                let g = (y - kr * r - kb * b) / kg;
-                pixels.extend([r, g, b, p3[i] as f32 / alpha_scale]);
-            }
+            // GBRAP to R, G, B, A.
+            planes.swap(0, 2);
+            planes.swap(1, 2);
         }
-        Ok(RgbaImage {
+        let bits = depth(format).clamp(1, 16) as u32;
+        let layout = NativeLayout {
+            planes: vec![0, 1, 2, 3],
+            rgb: rgb_source,
+            bits: 16,
+            chroma_shift: (0, 0),
+            full_range_format: false,
+        };
+        let mut encoding = encoding_of(frame, &layout, 16 - bits);
+        encoding.bits = bits;
+        Ok(PlanarImage {
             width: w as u32,
             height: h as u32,
-            pixels,
-            premultiplied: false,
+            encoding,
+            planes: planes
+                .into_iter()
+                .map(|data| Plane {
+                    width: w as u32,
+                    height: h as u32,
+                    data,
+                })
+                .collect(),
         })
+    }
+}
+
+/// A pixel format the GPU can take as it is: one plane per component, codes
+/// in the low bits of little-endian 8- or 16-bit samples.
+struct NativeLayout {
+    /// The FFmpeg plane holding each of Y, Cb, Cr (R, G, B) and alpha.
+    planes: Vec<usize>,
+    rgb: bool,
+    bits: u32,
+    chroma_shift: (u32, u32),
+    /// The deprecated `yuvj` formats, which mean full range whatever the tag.
+    full_range_format: bool,
+}
+
+impl NativeLayout {
+    fn chroma(&self, component: usize) -> bool {
+        !self.rgb && (component == 1 || component == 2)
+    }
+}
+
+fn native_layout(format: i32) -> Option<NativeLayout> {
+    let desc = unsafe { ffi::av_pix_fmt_desc_get(format).as_ref()? };
+    let flags = desc.flags;
+    let rejected = (ffi::AV_PIX_FMT_FLAG_BE
+        | ffi::AV_PIX_FMT_FLAG_PAL
+        | ffi::AV_PIX_FMT_FLAG_HWACCEL
+        | ffi::AV_PIX_FMT_FLAG_BITSTREAM
+        | ffi::AV_PIX_FMT_FLAG_FLOAT
+        | ffi::AV_PIX_FMT_FLAG_BAYER) as u64;
+    let alpha = flags & ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0;
+    let count = desc.nb_components as usize;
+    if flags & ffi::AV_PIX_FMT_FLAG_PLANAR as u64 == 0
+        || flags & rejected != 0
+        || count != if alpha { 4 } else { 3 }
+    {
+        return None;
+    }
+    let comps = &desc.comp[..count];
+    let bits = comps[0].depth as u32;
+    let step = if bits <= 8 { 1 } else { 2 };
+    let mut planes: Vec<usize> = comps.iter().map(|c| c.plane as usize).collect();
+    let uniform = comps
+        .iter()
+        .all(|c| c.depth as u32 == bits && c.step == step && c.shift == 0 && c.offset == 0);
+    let mut distinct = planes.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    if !uniform || distinct.len() != count || bits > 16 {
+        return None;
+    }
+    let rgb = flags & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0;
+    if rgb && (desc.log2_chroma_w, desc.log2_chroma_h) != (0, 0) {
+        return None;
+    }
+    planes.truncate(count);
+    let name = unsafe { std::ffi::CStr::from_ptr(desc.name) };
+    Some(NativeLayout {
+        planes,
+        rgb,
+        bits,
+        chroma_shift: (desc.log2_chroma_w as u32, desc.log2_chroma_h as u32),
+        full_range_format: name.to_bytes().starts_with(b"yuvj"),
+    })
+}
+
+/// How the frame's codes become colour, from its tags.
+fn encoding_of(frame: &AVFrame, layout: &NativeLayout, shift: u32) -> PlanarEncoding {
+    let model = if layout.rgb {
+        PlanarModel::Rgb
+    } else {
+        let matrix = match frame.colorspace {
+            ffi::AVCOL_SPC_BT470BG | ffi::AVCOL_SPC_SMPTE170M => YuvMatrix::Bt601,
+            ffi::AVCOL_SPC_BT2020_NCL | ffi::AVCOL_SPC_BT2020_CL => YuvMatrix::Bt2020,
+            ffi::AVCOL_SPC_BT709 => YuvMatrix::Bt709,
+            // Untagged: standard definition is usually Rec.601, HD Rec.709.
+            _ if frame.height < 720 => YuvMatrix::Bt601,
+            _ => YuvMatrix::Bt709,
+        };
+        let range = if frame.color_range == ffi::AVCOL_RANGE_JPEG || layout.full_range_format {
+            YuvRange::Full
+        } else {
+            YuvRange::Limited
+        };
+        PlanarModel::Yuv { matrix, range }
+    };
+    let siting = match frame.chroma_location {
+        ffi::AVCHROMA_LOC_CENTER => (Siting::Centred, Siting::Centred),
+        ffi::AVCHROMA_LOC_TOPLEFT => (Siting::Cosited, Siting::Cosited),
+        ffi::AVCHROMA_LOC_TOP => (Siting::Centred, Siting::Cosited),
+        // TODO: bottom siting (rare); treated as centred vertically.
+        ffi::AVCHROMA_LOC_BOTTOM => (Siting::Centred, Siting::Centred),
+        // Left, bottom-left and untagged: the MPEG-2 / H.264 / HEVC default.
+        _ => (Siting::Cosited, Siting::Centred),
+    };
+    PlanarEncoding {
+        model,
+        bits: layout.bits,
+        shift,
+        chroma_shift: layout.chroma_shift,
+        siting,
+        alpha: layout.planes.len() == 4,
     }
 }

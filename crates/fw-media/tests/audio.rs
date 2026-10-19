@@ -93,7 +93,7 @@ fn sound_lines_up_with_the_picture_from_the_same_file() {
         .frames
         .frame_at(fw_core::Time::from_seconds(1))
         .unwrap();
-    let frame = frames.frame(at).unwrap();
+    let frame = frames.frame(at).unwrap().to_rgba();
     assert_eq!(
         (frame.pixel(5, 5)[0] * 255.0).round() as u8,
         fw_testmedia::level(24)

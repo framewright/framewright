@@ -529,3 +529,104 @@ fn video_clips_show_the_frame_for_each_moment() {
         "a frame already shown comes from the cache"
     );
 }
+
+/// One clip filling a timeline the clip's size, delivered in the clip's own
+/// space, so the plan's output is exactly what the GPU unpacked.
+fn unpacked_on_gpu(video: &Path, at: Time) -> (RgbaImage, Plan) {
+    use fw_doc::{Placement, TimelineSettings, Track, TrackId, TrackKind};
+    let info = fw_media::probe_video(video).unwrap();
+    let mut ids = SequentialIds::new(90);
+    let root = ids.next_id();
+    let (v1, clip) = (TrackId(ids.next_id()), ids.next_id());
+    let settings = TimelineSettings {
+        width: info.width,
+        height: info.height,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    editor
+        .apply(
+            "Build",
+            vec![
+                Command::AddTrack {
+                    timeline: root,
+                    track: Track {
+                        id: v1,
+                        kind: TrackKind::Video,
+                        name: "V1".into(),
+                    },
+                    index: 0,
+                },
+                Command::AddNode {
+                    parent: root,
+                    id: clip,
+                    type_id: "fw.clip".into(),
+                    name: None,
+                    placement: Some(Placement {
+                        track: v1,
+                        start: Time::ZERO,
+                        duration: Time::from_seconds(1),
+                        source_in: Time::ZERO,
+                        speed: Time::from_seconds(1),
+                    }),
+                },
+                set(
+                    clip,
+                    "file",
+                    ParamValue::Media(MediaRef {
+                        path: video.display().to_string(),
+                    }),
+                ),
+            ],
+        )
+        .unwrap();
+    let media = ProjectMedia::new("/");
+    let options = Options {
+        delivery_space: info.space,
+        ..Options::at(at)
+    };
+    let plan = compile(editor.doc(), editor.registry(), &media, &options).unwrap();
+    let mut renderer = Renderer::new(gpu(), DEFAULT_CACHE_BYTES);
+    let image = renderer.render(&plan, &media).unwrap();
+    (Arc::unwrap_or_clone(image), plan)
+}
+
+#[test]
+fn gpu_unpacking_matches_the_cpu_reference() {
+    // 4:2:0 YUV with co-sited chroma, packed ARGB (unpacked to 16 bits by
+    // swscale), planar RGB and limited-range levels.
+    for video in [
+        fw_testmedia::h264(),
+        fw_testmedia::count_alpha(),
+        fw_testmedia::count_24fps(),
+        fw_testmedia::levels_yuv(),
+    ] {
+        let at = Time::of_frame(5, Time::from_seconds(24)).unwrap();
+        let (got, plan) = unpacked_on_gpu(&video, at);
+        assert!(
+            !plan.describe().contains("kernel"),
+            "{}: the output should be the unpacked load\n{}",
+            video.display(),
+            plan.describe()
+        );
+        let info = fw_media::probe_video(&video).unwrap();
+        let mut reader = fw_media::VideoReader::open(&video).unwrap();
+        let mut want = reader
+            .frame(info.frames.frame_at(at).unwrap())
+            .unwrap()
+            .to_rgba();
+        want.premultiply();
+        // Half-float output: within one f16 step of the reference.
+        for (i, (g, w)) in got.pixels.iter().zip(&want.pixels).enumerate() {
+            assert!(
+                (g - w).abs() <= w.abs().max(1.0 / 1024.0) / 1024.0 + 1e-6,
+                "{}: value {i} is {g}, reference {w}",
+                video.display()
+            );
+        }
+    }
+}

@@ -42,11 +42,51 @@ fn probes_are_cached_until_the_file_changes() {
         height: changed.height,
         region: fw_core::Rect::from_size(64.0, 32.0),
         frame: Some("1/10".parse().unwrap()),
+        node: None,
     };
-    let image = media.decode(&plan_frame).unwrap();
+    let image = media.decode(&plan_frame).unwrap().to_rgba();
     assert_eq!(
         (image.pixel(5, 5)[0] * 255.0).round() as u8,
         fw_testmedia::level(2)
     );
     assert_eq!(media.probe_reads(), 2);
+}
+
+#[test]
+fn two_clips_of_one_file_each_get_their_frames() {
+    use fw_core::Time;
+    use fw_core::id::{IdGen, SequentialIds};
+    let mut ids = SequentialIds::new(1);
+    let nodes = [ids.next_id(), ids.next_id()];
+    let path = fw_testmedia::count_24fps();
+    let media = ProjectMedia::new("/");
+    let info = media
+        .probe(&MediaRef {
+            path: path.display().to_string(),
+        })
+        .unwrap();
+    let load = |node: usize, n: i64| fw_compile::LoadStep {
+        output: fw_plugin::ImageHandle(0),
+        key: info.fingerprint,
+        path: path.clone(),
+        fingerprint: info.fingerprint,
+        space: info.space,
+        width: info.width,
+        height: info.height,
+        region: fw_core::Rect::from_size(64.0, 32.0),
+        frame: Some(Time::of_frame(n, Time::from_seconds(24)).unwrap()),
+        node: Some(nodes[node]),
+    };
+    // Two clips playing side by side from different places in the file.
+    for n in 0..12 {
+        for (node, start) in [(0, 0), (1, 30)] {
+            let image = media.decode(&load(node, start + n)).unwrap().to_rgba();
+            assert_eq!(
+                (image.pixel(5, 5)[0] * 255.0).round() as u8,
+                fw_testmedia::level((start + n) as u64),
+                "clip {node}, frame {}",
+                start + n
+            );
+        }
+    }
 }

@@ -14,18 +14,22 @@ use std::time::Duration;
 
 use fw_audio::MasterClock;
 use fw_compile::{Options, compile};
-use fw_core::{RgbaImage, Time};
+use fw_core::Time;
 use fw_doc::Document;
 use fw_media::ProjectMedia;
 use fw_plugin::Registry;
-use fw_render::Renderer;
+use fw_render::{GpuImage, Renderer};
 
 /// Makes the image for a frame. Runs on the render thread.
 pub trait FrameSource: Send {
-    fn frame(&mut self, index: i64) -> Result<Arc<RgbaImage>, String>;
+    /// What a frame is: for showing, an image on the GPU.
+    type Frame: Clone + Send + 'static;
+
+    fn frame(&mut self, index: i64) -> Result<Self::Frame, String>;
 }
 
-/// Frames of a document: compiled and rendered at `index / rate`.
+/// Frames of a document: compiled at `index / rate` and rendered to images
+/// that stay on the GPU.
 pub struct DocumentFrames {
     pub doc: Document,
     pub registry: Arc<Registry>,
@@ -36,7 +40,9 @@ pub struct DocumentFrames {
 }
 
 impl FrameSource for DocumentFrames {
-    fn frame(&mut self, index: i64) -> Result<Arc<RgbaImage>, String> {
+    type Frame = GpuImage;
+
+    fn frame(&mut self, index: i64) -> Result<GpuImage, String> {
         let time = Time::of_frame(index, self.rate).map_err(|e| e.to_string())?;
         let options = Options {
             time,
@@ -45,18 +51,18 @@ impl FrameSource for DocumentFrames {
         let plan =
             compile(&self.doc, &self.registry, &self.media, &options).map_err(|e| e.to_string())?;
         self.renderer
-            .render(&plan, &self.media)
+            .render_gpu(&plan, &self.media)
             .map_err(|e| e.to_string())
     }
 }
 
 /// A frame to put on screen.
 #[derive(Clone)]
-pub struct Presented {
+pub struct Presented<F> {
     pub index: i64,
     /// When the frame starts on the timeline.
     pub time: Time,
-    pub image: Arc<RgbaImage>,
+    pub image: F,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -69,30 +75,30 @@ pub struct PlaybackStats {
     pub errors: u64,
 }
 
-struct Shared {
-    ready: Mutex<BTreeMap<i64, Result<Arc<RgbaImage>, String>>>,
+struct Shared<F> {
+    ready: Mutex<BTreeMap<i64, Result<F, String>>>,
     rendered: Condvar,
 }
 
-pub struct Player {
+pub struct Player<F> {
     rate: Time,
     clock: Arc<dyn MasterClock>,
     ahead: i64,
-    shared: Arc<Shared>,
+    shared: Arc<Shared<F>>,
     wanted: Sender<i64>,
     thread: Option<JoinHandle<()>>,
-    shown: Option<Presented>,
+    shown: Option<Presented<F>>,
     stats: PlaybackStats,
 }
 
-impl Player {
+impl<F: Clone + Send + 'static> Player<F> {
     /// `rate` is frames per second; `ahead` how many frames to render ahead.
     pub fn new(
-        source: Box<dyn FrameSource>,
+        source: Box<dyn FrameSource<Frame = F>>,
         clock: Arc<dyn MasterClock>,
         rate: Time,
         ahead: i64,
-    ) -> Player {
+    ) -> Player<F> {
         let shared = Arc::new(Shared {
             ready: Mutex::new(BTreeMap::new()),
             rendered: Condvar::new(),
@@ -126,7 +132,7 @@ impl Player {
 
     /// Called once per display refresh. Returns a frame when the picture
     /// should change.
-    pub fn tick(&mut self) -> Option<Presented> {
+    pub fn tick(&mut self) -> Option<Presented<F>> {
         let due = self.due();
         let _ = self.wanted.send(due);
         let mut ready = self.shared.ready.lock().unwrap_or_else(|e| e.into_inner());
@@ -176,7 +182,7 @@ impl Player {
     }
 }
 
-impl Drop for Player {
+impl<F> Drop for Player<F> {
     fn drop(&mut self) {
         // Closing the channel stops the render thread.
         let (dead, _) = mpsc::channel();
@@ -190,10 +196,10 @@ impl Drop for Player {
 /// Renders ahead of the most recently wanted frame. It aims as far ahead as
 /// rendering a frame takes, so a slow source still finishes frames before
 /// their moment instead of always finishing them too late.
-fn render_ahead(
-    mut source: Box<dyn FrameSource>,
+fn render_ahead<F: Clone + Send + 'static>(
+    mut source: Box<dyn FrameSource<Frame = F>>,
     requests: Receiver<i64>,
-    shared: Arc<Shared>,
+    shared: Arc<Shared<F>>,
     ahead: i64,
     rate: Time,
 ) {

@@ -175,7 +175,7 @@ pub fn read_image(path: &Path) -> Result<(RgbaImage, ColorSpace), MediaError> {
         Format::Video => {
             let mut reader = VideoReader::open(path)?;
             let space = probe_video(path)?.space;
-            Ok((reader.frame(Time::ZERO)?, space))
+            Ok((reader.frame(Time::ZERO)?.to_rgba(), space))
         }
         Format::Png | Format::Jpeg => {
             let decoded = image::open(path)

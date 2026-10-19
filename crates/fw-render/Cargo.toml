@@ -9,7 +9,8 @@ publish.workspace = true
 fw-compile.workspace = true
 fw-core.workspace = true
 fw-plugin.workspace = true
-half = "2"
+bytemuck = "1"
+half = { version = "2", features = ["bytemuck"] }
 pollster = "0.4"
 thiserror.workspace = true
 wgpu.workspace = true
