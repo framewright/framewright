@@ -162,7 +162,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Each placement has three clocks: position in the parent, animation time, and source time.
 - **[Decided]** Keyframes are anchored to a clip's start, end or a percentage of its length, so trimming and retiming behave predictably.
 - **[Decided]** Variable frame rate is kept as a fact about the source: exact per-frame timestamps, and footage is never rewritten to a constant rate.
-- **[Proposed]** (from step 2) **Timeline details:**
+- **[Decided]** (from step 2) **Timeline details:**
   - Tracks are ordered bottom to top and composite like every NLE: each active clip goes over the tracks below it using its alpha, its Opacity and its Composite mode (Normal and Add for now; more modes later), in scene-linear light. A gap is transparent black.
   - Layers hidden under an opaque, full-frame, Normal clip at 100% are never rendered, so the common case costs one clip.
   - A clip's placement (track, start, duration, source in point, speed) lives in the timeline and is saved next to the clip's node. Clips on one track never overlap; edits that would overlap are refused.
@@ -254,7 +254,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 
 - **[Decided]** FFmpeg, as a private, pinned, checksummed LGPL build. The app never uses system FFmpeg. Patent-encumbered components are loaded at runtime. FFmpeg is hidden behind our own media interface and nothing else touches it.
 - **[Decided]** (from step 2) **During development only,** `fw-media` links the system FFmpeg libraries, behind the same interface. The private pinned build becomes its own task, done before anything is distributed.
-- **[Proposed]** (from step 2) **Video decoding details:**
+- **[Decided]** (from step 2) **Video decoding details:**
   - The FFmpeg binding is `rsmpeg`. It links the system FFmpeg now and can link the private build later through environment variables, so no rewrite.
   - Source time 0 is a video's first frame, whatever the container's own start time.
   - Frame times come from the container's timestamps. If every timestamp matches the declared rate after the container's rounding (Matroska stores whole milliseconds), the rate is treated as constant and exact; otherwise each frame keeps its exact time.
