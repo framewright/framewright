@@ -75,6 +75,9 @@ pub struct ImageInfo {
     pub pixel_aspect: f64,
     /// TODO: optional extra channels (depth, motion, IDs, normals; design §4.2).
     pub extra_channels: Vec<String>,
+    /// Known to have alpha 1 everywhere in `region`. `false` means "unknown",
+    /// so it's always safe. Lets a stack skip what an opaque layer hides.
+    pub opaque: bool,
 }
 
 /// The colour space a node wants an input in. The compiler converts to it.
@@ -87,14 +90,16 @@ pub enum SpaceNeed {
     Delivery,
 }
 
-/// A per-pixel operation: reads one pixel and writes one pixel. Adjacent
-/// per-pixel operations are fused into one GPU pass.
+/// A per-pixel operation: reads one pixel (plus the same pixel of any extra
+/// inputs) and writes one pixel. Adjacent per-pixel operations are fused into
+/// one GPU pass.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PixelOp {
     /// Shown by `fw inspect`, e.g. `"exposure"`.
     pub label: String,
     /// A WGSL function body. `c` is the premultiplied input `vec4<f32>`,
-    /// `prm(base, i)` reads parameter `i`, and it must return a `vec4<f32>`.
+    /// `e0`, `e1`, … are the extra inputs' pixels, `prm(base, i)` reads
+    /// parameter `i`, and it must return a `vec4<f32>`.
     pub wgsl: String,
     pub params: Vec<f32>,
 }
@@ -116,7 +121,19 @@ pub trait PlanBuilder {
     ) -> Result<ImageHandle, NodeError>;
 
     /// Applies a per-pixel operation. The output is in the input's colour space.
-    fn per_pixel(&mut self, input: ImageHandle, op: PixelOp) -> ImageHandle;
+    fn per_pixel(&mut self, input: ImageHandle, op: PixelOp) -> ImageHandle {
+        self.per_pixel_with(input, &[], op)
+    }
+
+    /// A per-pixel operation that also reads `extra` inputs, e.g. a merge
+    /// reading the foreground while `input` is the background. Extra inputs
+    /// must be in the same colour space as `input`.
+    fn per_pixel_with(
+        &mut self,
+        input: ImageHandle,
+        extra: &[ImageHandle],
+        op: PixelOp,
+    ) -> ImageHandle;
 }
 
 pub trait ImageBehaviour: Send + Sync {

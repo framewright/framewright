@@ -36,6 +36,8 @@ pub struct MediaInfo {
     pub fingerprint: ContentHash,
     /// Frame timing for video; `None` for a still image.
     pub frames: Option<FrameTimes>,
+    /// The file has no alpha channel, so every pixel is opaque.
+    pub opaque: bool,
 }
 
 pub trait MediaResolver {

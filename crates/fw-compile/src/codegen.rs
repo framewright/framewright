@@ -116,13 +116,24 @@ pub fn conversion(from: ColorSpace, to: ColorSpace) -> Option<PixelOp> {
 }
 
 /// A compute shader running `ops` in order on every pixel.
-pub fn kernel(ops: &[KernelOp]) -> String {
+/// A compute shader running `ops` in order on every pixel. Extra inputs are
+/// bound from binding 3 onwards, in `extra_inputs` order.
+pub fn kernel(ops: &[KernelOp], extra_inputs: usize) -> String {
     let mut out = String::from(PRELUDE);
+    for k in 0..extra_inputs {
+        out.push_str(&format!(
+            "@group(0) @binding({}) var ex{k}: texture_2d<f32>;\n",
+            3 + k
+        ));
+    }
     let mut base = 0usize;
     let mut calls = String::new();
     for (i, op) in ops.iter().enumerate() {
+        let extra_params: String = (0..op.extra.len())
+            .map(|j| format!(", e{j}: vec4<f32>"))
+            .collect();
         out.push_str(&format!(
-            "\n// {}\nfn op_{i}(c: vec4<f32>) -> vec4<f32> {{\n    let base = {base}u;\n",
+            "\n// {}\nfn op_{i}(c: vec4<f32>{extra_params}) -> vec4<f32> {{\n    let base = {base}u;\n",
             op.label
         ));
         for line in op.wgsl.lines() {
@@ -131,7 +142,8 @@ pub fn kernel(ops: &[KernelOp]) -> String {
             out.push('\n');
         }
         out.push_str("}\n");
-        calls.push_str(&format!("    c = op_{i}(c);\n"));
+        let extra_args: String = op.extra.iter().map(|slot| format!(", x{slot}")).collect();
+        calls.push_str(&format!("    c = op_{i}(c{extra_args});\n"));
         base += op.params.len();
     }
     out.push_str(
@@ -140,7 +152,29 @@ pub fn kernel(ops: &[KernelOp]) -> String {
          if (id.x >= size.x || id.y >= size.y) {\n        return;\n    }\n    \
          var c = textureLoad(src, vec2<i32>(id.xy), 0);\n",
     );
+    for k in 0..extra_inputs {
+        out.push_str(&format!(
+            "    let x{k} = textureLoad(ex{k}, vec2<i32>(id.xy), 0);\n"
+        ));
+    }
     out.push_str(&calls);
     out.push_str("    textureStore(dst, vec2<i32>(id.xy), c);\n}\n");
     out
+}
+
+/// Combines a foreground (`e0`) over the background (`c`), both premultiplied,
+/// or `None` for a mode we don't know.
+pub fn composite(mode: &str) -> Option<PixelOp> {
+    let wgsl = match mode {
+        // Porter–Duff "over".
+        "normal" => "return e0 + c * (1.0 - e0.a);",
+        // Light adds; coverage combines like "over".
+        "add" => "return vec4<f32>(c.rgb + e0.rgb, e0.a + c.a * (1.0 - e0.a));",
+        _ => return None,
+    };
+    Some(PixelOp {
+        label: format!("composite {mode}"),
+        wgsl: wgsl.into(),
+        params: vec![],
+    })
 }

@@ -39,6 +39,7 @@ impl MediaResolver for ProjectMedia {
             fingerprint: probe.fingerprint,
             // TODO: video, in step 2's next check-in.
             frames: None,
+            opaque: !probe.has_alpha,
         })
     }
 }

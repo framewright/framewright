@@ -25,6 +25,8 @@ enum OpKind {
     Fill(FillStep),
     Pixel {
         input: ImageHandle,
+        /// Further inputs the op reads at the same pixel.
+        extra: Vec<ImageHandle>,
         op: PixelOp,
         origin: Origin,
     },
@@ -112,9 +114,9 @@ pub fn compile(
 }
 
 impl Lowering<'_> {
-    /// Lowers a Timeline at parent time `t`: the clip on the top-most video
-    /// track wins, with no blending (that's a LayerStack's job). A gap is
-    /// transparent black.
+    /// Lowers a Timeline at parent time `t`: active video clips stack bottom
+    /// to top, each combined with what's below by its composite mode, in
+    /// scene-linear light. A gap is transparent black.
     fn timeline(
         &mut self,
         id: NodeId,
@@ -123,12 +125,14 @@ impl Lowering<'_> {
     ) -> Result<ImageHandle, CompileError> {
         let settings = &timeline.settings;
         let canvas = Rect::from_size(settings.width as f64, settings.height as f64);
-        let delivery = self.options.delivery_space;
+        let working = self.options.working_space;
         let video = timeline
             .tracks
             .iter()
             .rev()
             .filter(|track| track.kind == TrackKind::Video);
+        // Top first, stopping at a layer that hides everything below it.
+        let mut layers: Vec<(ImageHandle, String)> = vec![];
         for track in video {
             let Some((clip, placement)) = timeline.clip_at(track.id, t) else {
                 continue;
@@ -152,23 +156,104 @@ impl Lowering<'_> {
             let image = self.node(&[id], clip, &request, clock)?;
             let region = self.ops[image.0 as usize].info.region;
             if region != canvas {
-                let node = self.doc.node(clip).expect("clips exist");
                 // TODO: placement is a transform, not a resample (design §4).
-                return Err(CompileError::Node {
-                    node: clip,
-                    name: node.name().to_owned(),
-                    message: format!(
+                return Err(self.node_error(
+                    clip,
+                    format!(
                         "media of {}×{} can't be placed on a {}×{} timeline yet",
                         region.width(),
                         region.height(),
                         settings.width,
                         settings.height
                     ),
-                });
+                ));
             }
-            return Ok(self.convert(image, delivery));
+            let mode = self.composite_mode(clip, clock)?;
+            let hides_below = mode == "normal" && self.ops[image.0 as usize].info.opaque;
+            layers.push((image, mode));
+            if hides_below {
+                break;
+            }
         }
-        Ok(self.fill([0.0; 4], delivery, canvas))
+        let delivery = self.options.delivery_space;
+        match layers.len() {
+            0 => return Ok(self.fill([0.0; 4], delivery, canvas)),
+            // Nothing to blend, so go straight to the delivery space.
+            1 => return Ok(self.convert(layers[0].0, delivery)),
+            _ => {}
+        }
+        let mut bottom_up = layers.into_iter().rev();
+        let (bottom, _) = bottom_up.next().expect("checked above");
+        // Over transparent black every mode leaves the bottom layer as it is.
+        let mut stack = self.convert(bottom, working);
+        for (layer, mode) in bottom_up {
+            let layer = self.convert(layer, working);
+            stack = self.composite(id, stack, layer, &mode);
+        }
+        Ok(self.convert(stack, delivery))
+    }
+
+    /// The clip's composite mode at this moment. Clips without one are "normal".
+    fn composite_mode(&self, clip: NodeId, clock: Clock) -> Result<String, CompileError> {
+        let Some(Node::Known(known)) = self.doc.node(clip) else {
+            return Ok("normal".into());
+        };
+        let Some(stored) = known.params.get("composite") else {
+            return Ok("normal".into());
+        };
+        let value = stored
+            .value_at(clock.key)
+            .map_err(|e| self.node_error(clip, format!("parameter \"composite\": {e}")))?;
+        let mode = value.as_text().unwrap_or("normal").to_owned();
+        if codegen::composite(&mode).is_none() {
+            return Err(self.node_error(clip, format!("unknown composite mode {mode:?}")));
+        }
+        Ok(mode)
+    }
+
+    fn composite(
+        &mut self,
+        container: NodeId,
+        below: ImageHandle,
+        above: ImageHandle,
+        mode: &str,
+    ) -> ImageHandle {
+        let op = codegen::composite(mode).expect("modes are checked when read");
+        let (below_info, above_info) = (&self.ops[below.0 as usize], &self.ops[above.0 as usize]);
+        let key = KeyHasher::new("fw.composite")
+            .hash(&below_info.key)
+            .hash(&above_info.key)
+            .str(mode)
+            .finish();
+        let info = ImageInfo {
+            opaque: below_info.info.opaque || above_info.info.opaque,
+            ..below_info.info.clone()
+        };
+        self.push(Op {
+            kind: OpKind::Pixel {
+                input: below,
+                extra: vec![above],
+                op,
+                origin: Origin::Composite {
+                    container,
+                    mode: mode.to_owned(),
+                },
+            },
+            info,
+            key,
+        })
+    }
+
+    fn node_error(&self, node: NodeId, message: String) -> CompileError {
+        CompileError::Node {
+            node,
+            name: self
+                .doc
+                .node(node)
+                .map(|n| n.name().to_owned())
+                .unwrap_or_default(),
+            message,
+        }
     }
 
     fn fill(&mut self, rgba: [f32; 4], space: ColorSpace, region: Rect) -> ImageHandle {
@@ -195,6 +280,7 @@ impl Lowering<'_> {
                 region,
                 pixel_aspect: 1.0,
                 extra_channels: vec![],
+                opaque: rgba[3] >= 1.0,
             },
             key,
         })
@@ -330,6 +416,7 @@ impl Lowering<'_> {
         self.push(Op {
             kind: OpKind::Pixel {
                 input: image,
+                extra: vec![],
                 op,
                 origin: Origin::Conversion { from, to },
             },
@@ -354,9 +441,11 @@ impl Lowering<'_> {
             if std::mem::replace(&mut live[i], true) {
                 continue;
             }
-            if let OpKind::Pixel { input, .. } = &self.ops[i].kind {
-                consumers[input.0 as usize] += 1;
-                stack.push(*input);
+            if let OpKind::Pixel { input, extra, .. } = &self.ops[i].kind {
+                for h in std::iter::once(input).chain(extra) {
+                    consumers[h.0 as usize] += 1;
+                    stack.push(*h);
+                }
             }
         }
 
@@ -378,48 +467,69 @@ impl Lowering<'_> {
                 OpKind::Fill(fill) => steps.push(Step::Fill(fill)),
                 OpKind::Pixel {
                     input,
+                    extra,
                     op: pixel,
                     origin,
                 } => {
-                    let kernel_op = KernelOp {
+                    let mut kernel_op = KernelOp {
                         label: pixel.label,
                         wgsl: pixel.wgsl,
                         params: pixel.params,
                         origin,
+                        extra: vec![],
                     };
                     let input_i = input.0 as usize;
+                    // Fuse into the input's kernel if nothing else needs the
+                    // input, and every extra input is ready before that kernel runs.
                     let fuse_into = kernel_of
                         .get(&input_i)
                         .copied()
-                        .filter(|_| consumers[input_i] == 1);
+                        .filter(|_| consumers[input_i] == 1)
+                        .filter(|s| {
+                            extra.iter().all(|e| {
+                                steps
+                                    .iter()
+                                    .position(|st| st.output() == *e)
+                                    .is_some_and(|p| p < *s)
+                            })
+                        });
                     let step_index = match fuse_into {
-                        Some(s) => {
-                            let Step::Kernel(k) = &mut steps[s] else {
-                                unreachable!()
-                            };
-                            k.ops.push(kernel_op);
-                            k.output = ImageHandle(i as u32);
-                            k.key = op.key;
-                            s
-                        }
+                        Some(s) => s,
                         None => {
                             steps.push(Step::Kernel(KernelStep {
                                 output: ImageHandle(i as u32),
                                 key: op.key,
                                 input,
-                                ops: vec![kernel_op],
+                                extra_inputs: vec![],
+                                ops: vec![],
                                 wgsl: String::new(),
                             }));
                             steps.len() - 1
                         }
                     };
+                    let Step::Kernel(k) = &mut steps[step_index] else {
+                        unreachable!("only kernels are fused into")
+                    };
+                    for e in extra {
+                        let slot = match k.extra_inputs.iter().position(|x| *x == e) {
+                            Some(slot) => slot,
+                            None => {
+                                k.extra_inputs.push(e);
+                                k.extra_inputs.len() - 1
+                            }
+                        };
+                        kernel_op.extra.push(slot);
+                    }
+                    k.ops.push(kernel_op);
+                    k.output = ImageHandle(i as u32);
+                    k.key = op.key;
                     kernel_of.insert(i, step_index);
                 }
             }
         }
         for step in &mut steps {
             if let Step::Kernel(k) = step {
-                k.wgsl = codegen::kernel(&k.ops);
+                k.wgsl = codegen::kernel(&k.ops, k.extra_inputs.len());
             }
         }
         Ok(Plan {
@@ -477,6 +587,7 @@ impl PlanBuilder for NodeBuilder<'_, '_> {
             region,
             pixel_aspect: 1.0,
             extra_channels: vec![],
+            opaque: found.opaque,
         };
         let key = key.finish();
         let output = ImageHandle(self.lowering.ops.len() as u32);
@@ -497,12 +608,25 @@ impl PlanBuilder for NodeBuilder<'_, '_> {
         }))
     }
 
-    fn per_pixel(&mut self, input: ImageHandle, op: PixelOp) -> ImageHandle {
-        let Some(input_op) = self.lowering.ops.get(input.0 as usize) else {
-            self.bad_handle = Some(input);
+    fn per_pixel_with(
+        &mut self,
+        input: ImageHandle,
+        extra: &[ImageHandle],
+        op: PixelOp,
+    ) -> ImageHandle {
+        let ops = &self.lowering.ops;
+        if let Some(bad) = std::iter::once(&input)
+            .chain(extra)
+            .find(|h| h.0 as usize >= ops.len())
+        {
+            self.bad_handle = Some(*bad);
             return input;
+        }
+        let info = ImageInfo {
+            // A node's own maths might change alpha; only it could say otherwise.
+            opaque: false,
+            ..ops[input.0 as usize].info.clone()
         };
-        let info = input_op.info.clone();
         let key = KeyHasher::new("fw.op")
             .hash(&self.node_key)
             .u32(self.next_op)
@@ -511,6 +635,7 @@ impl PlanBuilder for NodeBuilder<'_, '_> {
         self.lowering.push(Op {
             kind: OpKind::Pixel {
                 input,
+                extra: extra.to_vec(),
                 op,
                 origin: self.origin.clone(),
             },

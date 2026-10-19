@@ -65,6 +65,8 @@ pub struct Probe {
     pub height: u32,
     pub space: ColorSpace,
     pub fingerprint: ContentHash,
+    /// The file stores an alpha channel. Without one every pixel is opaque.
+    pub has_alpha: bool,
 }
 
 fn format_of(path: &Path) -> Result<Format, MediaError> {
@@ -95,10 +97,17 @@ pub fn probe(path: &Path) -> Result<Probe, MediaError> {
         path: path.to_owned(),
         message,
     };
-    let (width, height, space) = match format_of(path)? {
+    let (width, height, space, has_alpha) = match format_of(path)? {
         Format::Png | Format::Jpeg => {
-            let (w, h) = image::image_dimensions(path).map_err(|e| decode(e.to_string()))?;
-            (w, h, ColorSpace::SRGB)
+            use image::ImageDecoder as _;
+            let decoder = image::ImageReader::open(path)
+                .map_err(|e| decode(e.to_string()))?
+                .with_guessed_format()
+                .map_err(|e| decode(e.to_string()))?
+                .into_decoder()
+                .map_err(|e| decode(e.to_string()))?;
+            let (w, h) = decoder.dimensions();
+            (w, h, ColorSpace::SRGB, decoder.color_type().has_alpha())
         }
         Format::Exr => {
             let meta = exr::meta::MetaData::read_from_file(path, false)
@@ -108,10 +117,16 @@ pub fn probe(path: &Path) -> Result<Probe, MediaError> {
                 .first()
                 .ok_or_else(|| decode("no layers".into()))?;
             let size = header.layer_size;
+            let has_alpha = header
+                .channels
+                .list
+                .iter()
+                .any(|c| c.name.to_string() == "A");
             (
                 size.width() as u32,
                 size.height() as u32,
                 exr_space(header.shared_attributes.chromaticities),
+                has_alpha,
             )
         }
     };
@@ -120,6 +135,7 @@ pub fn probe(path: &Path) -> Result<Probe, MediaError> {
         height,
         space,
         fingerprint: fingerprint(path)?,
+        has_alpha,
     })
 }
 

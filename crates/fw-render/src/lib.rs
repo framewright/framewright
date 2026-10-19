@@ -43,10 +43,9 @@ pub struct Stats {
 
 pub struct Renderer {
     gpu: Arc<Gpu>,
-    /// One layout for every kernel, so a shader that never reads its
-    /// parameters still binds the same resources.
-    kernel_layout: wgpu::BindGroupLayout,
-    kernel_pipeline_layout: wgpu::PipelineLayout,
+    /// Kernel layouts by number of extra inputs. Explicit, so a shader that
+    /// never reads some binding still matches the resources we bind.
+    kernel_layouts: HashMap<usize, KernelLayout>,
     cache: RamCache,
     pipelines: HashMap<ContentHash, wgpu::ComputePipeline>,
     /// Unused textures by size, reused instead of reallocated.
@@ -54,57 +53,72 @@ pub struct Renderer {
     stats: Stats,
 }
 
+struct KernelLayout {
+    bind_group: wgpu::BindGroupLayout,
+    pipeline: wgpu::PipelineLayout,
+}
+
+impl KernelLayout {
+    /// Binding 0: the main input. 1: the output. 2: parameters. 3…: extra inputs.
+    fn new(device: &wgpu::Device, extra_inputs: usize) -> KernelLayout {
+        let texture = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let mut entries = vec![
+            texture(0),
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: FORMAT,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ];
+        entries.extend((0..extra_inputs).map(|k| texture(3 + k as u32)));
+        let bind_group = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fw-kernel"),
+            entries: &entries,
+        });
+        let pipeline = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fw-kernel"),
+            bind_group_layouts: &[Some(&bind_group)],
+            immediate_size: 0,
+        });
+        KernelLayout {
+            bind_group,
+            pipeline,
+        }
+    }
+}
+
 /// A default RAM cache budget of 2 GiB.
 pub const DEFAULT_CACHE_BYTES: usize = 2 << 30;
 
 impl Renderer {
     pub fn new(gpu: Arc<Gpu>, cache_bytes: usize) -> Renderer {
-        let device = &gpu.device;
-        let kernel_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fw-kernel"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: FORMAT,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-        let kernel_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("fw-kernel"),
-                bind_group_layouts: &[Some(&kernel_layout)],
-                immediate_size: 0,
-            });
         Renderer {
             gpu,
-            kernel_layout,
-            kernel_pipeline_layout,
+            kernel_layouts: HashMap::new(),
             cache: RamCache::new(cache_bytes),
             pipelines: HashMap::new(),
             pool: HashMap::new(),
@@ -144,8 +158,10 @@ impl Renderer {
                 Step::Fill(fill) => self.fill(fill),
                 Step::Kernel(kernel) => {
                     let input = &textures[&kernel.input];
+                    let extra: Vec<&wgpu::Texture> =
+                        kernel.extra_inputs.iter().map(|e| &textures[e]).collect();
                     let output = self.texture(input.width(), input.height());
-                    self.dispatch(&mut encoder, kernel, input, &output);
+                    self.dispatch(&mut encoder, kernel, input, &extra, &output);
                     output
                 }
             };
@@ -260,10 +276,15 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         kernel: &KernelStep,
         input: &wgpu::Texture,
+        extra: &[&wgpu::Texture],
         output: &wgpu::Texture,
     ) {
         self.stats.kernels += 1;
         let device = &self.gpu.device;
+        let layout = self
+            .kernel_layouts
+            .entry(extra.len())
+            .or_insert_with(|| KernelLayout::new(device, extra.len()));
         let shader_key = ContentHash::of_bytes(kernel.wgsl.as_bytes());
         let pipeline = self.pipelines.entry(shader_key).or_insert_with(|| {
             self.stats.pipelines_built += 1;
@@ -273,7 +294,7 @@ impl Renderer {
             });
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("fw-kernel"),
-                layout: Some(&self.kernel_pipeline_layout),
+                layout: Some(&layout.pipeline),
                 module: &module,
                 entry_point: Some("main"),
                 compilation_options: Default::default(),
@@ -294,23 +315,37 @@ impl Renderer {
         self.gpu.queue.write_buffer(&buffer, 0, &bytes);
         let input_view = input.create_view(&Default::default());
         let output_view = output.create_view(&Default::default());
+        let extra_views: Vec<wgpu::TextureView> = extra
+            .iter()
+            .map(|t| t.create_view(&Default::default()))
+            .collect();
+        let mut entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&input_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&output_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: buffer.as_entire_binding(),
+            },
+        ];
+        entries.extend(
+            extra_views
+                .iter()
+                .enumerate()
+                .map(|(k, view)| wgpu::BindGroupEntry {
+                    binding: 3 + k as u32,
+                    resource: wgpu::BindingResource::TextureView(view),
+                }),
+        );
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fw-kernel"),
-            layout: &self.kernel_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&input_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&output_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: buffer.as_entire_binding(),
-                },
-            ],
+            layout: &layout.bind_group,
+            entries: &entries,
         });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("fw-kernel"),

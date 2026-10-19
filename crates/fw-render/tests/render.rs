@@ -338,3 +338,112 @@ fn timelines_render_clips_and_transparent_gaps() {
         "a gap is transparent black"
     );
 }
+
+#[test]
+fn layers_composite_over_each_other_in_linear_light() {
+    use fw_core::color::conversion_matrix;
+    use fw_doc::{Placement, TimelineSettings, Track, TrackId, TrackKind};
+    let s = scene();
+    // A second, different image for the bottom track.
+    let mut bottom_src = test_image();
+    for px in bottom_src.pixels.chunks_exact_mut(4) {
+        px.swap(0, 2);
+        px[3] = 1.0;
+    }
+    fw_media::write_png(&s._dir.path().join("bottom.png"), &bottom_src, false).unwrap();
+    let (bottom_src, _) = fw_media::read_image(&s._dir.path().join("bottom.png")).unwrap();
+
+    let mut ids = SequentialIds::new(60);
+    let root = ids.next_id();
+    let (v1, v2) = (TrackId(ids.next_id()), TrackId(ids.next_id()));
+    let (under, over) = (ids.next_id(), ids.next_id());
+    let settings = TimelineSettings {
+        width: W,
+        height: H,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    let track = |id, index| Command::AddTrack {
+        timeline: root,
+        track: Track {
+            id,
+            kind: TrackKind::Video,
+            name: format!("V{}", index + 1),
+        },
+        index,
+    };
+    let clip = |id, track| Command::AddNode {
+        parent: root,
+        id,
+        type_id: "fw.clip".into(),
+        name: None,
+        placement: Some(Placement {
+            track,
+            start: Time::ZERO,
+            duration: Time::from_seconds(1),
+            source_in: Time::ZERO,
+            speed: Time::from_seconds(1),
+        }),
+    };
+    editor
+        .apply(
+            "Build",
+            vec![
+                track(v1, 0),
+                track(v2, 1),
+                clip(under, v1),
+                clip(over, v2),
+                set(
+                    under,
+                    "file",
+                    ParamValue::Media(MediaRef {
+                        path: "bottom.png".into(),
+                    }),
+                ),
+                set(
+                    over,
+                    "file",
+                    ParamValue::Media(MediaRef {
+                        path: "gradient.png".into(),
+                    }),
+                ),
+                set(over, "opacity", ParamValue::Float(50.0)),
+            ],
+        )
+        .unwrap();
+    let plan = compile(
+        editor.doc(),
+        editor.registry(),
+        &s.media,
+        &Options::at(Time::ZERO),
+    )
+    .unwrap();
+    let got = Renderer::new(gpu(), DEFAULT_CACHE_BYTES)
+        .render(&plan, &s.media)
+        .unwrap();
+
+    // Both layers in ACEScg, the top one faded and stored as half floats
+    // between passes, then "over", then to linear Rec.709.
+    let half = |v: f32| half::f16::from_f32(v).to_f32();
+    let top = reference(&s.source, ColorSpace::SRGB, 0.0, ColorSpace::ACESCG);
+    let below = reference(&bottom_src, ColorSpace::SRGB, 0.0, ColorSpace::ACESCG);
+    let to_rec709 = conversion_matrix(
+        ColorSpace::ACESCG.primaries,
+        ColorSpace::LINEAR_REC709.primaries,
+    );
+    let mut want = RgbaImage::new(W, H, true);
+    for y in 0..H {
+        for x in 0..W {
+            let fg = top.pixel(x, y).map(|v| half(v * 0.5));
+            let bg = below.pixel(x, y);
+            let over: [f32; 4] = std::array::from_fn(|i| fg[i] + bg[i] * (1.0 - fg[3]));
+            let rgb = mul_vec(&to_rec709, [over[0], over[1], over[2]].map(f64::from));
+            want.set_pixel(x, y, [rgb[0] as f32, rgb[1] as f32, rgb[2] as f32, over[3]]);
+        }
+    }
+    assert_close(&got, &want, "50% layer over another");
+}

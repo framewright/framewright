@@ -163,7 +163,8 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Keyframes are anchored to a clip's start, end or a percentage of its length, so trimming and retiming behave predictably.
 - **[Decided]** Variable frame rate is kept as a fact about the source: exact per-frame timestamps, and footage is never rewritten to a constant rate.
 - **[Proposed]** (from step 2) **Timeline details:**
-  - Tracks are ordered bottom to top. At any moment the top-most active video clip is shown, with no blending (blending is a LayerStack's job). A gap is transparent black.
+  - Tracks are ordered bottom to top and composite like every NLE: each active clip goes over the tracks below it using its alpha, its Opacity and its Composite mode (Normal and Add for now; more modes later), in scene-linear light. A gap is transparent black.
+  - Layers hidden under an opaque, full-frame, Normal clip at 100% are never rendered, so the common case costs one clip.
   - A clip's placement (track, start, duration, source in point, speed) lives in the timeline and is saved next to the clip's node. Clips on one track never overlap; edits that would overlap are refused.
   - A key's time is measured from the clip's start (the default), its end, or a fraction of its length. Outside a clip only start anchors are valid.
   - Video frames are chosen by source time, and the chosen frame's timestamp is part of the load's cache key. A still clip therefore keys the same for its whole length.

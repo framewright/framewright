@@ -77,9 +77,14 @@ impl Plan {
                 }
                 Step::Kernel(kernel) => {
                     let fused = if kernel.ops.len() > 1 { ", fused" } else { "" };
+                    let extra: String = kernel
+                        .extra_inputs
+                        .iter()
+                        .map(|e| format!(", %{}", e.0))
+                        .collect();
                     let _ = writeln!(
                         out,
-                        "  %{} = kernel(%{}) {} op(s){fused}  key {}",
+                        "  %{} = kernel(%{}{extra}) {} op(s){fused}  key {}",
                         kernel.output.0,
                         kernel.input.0,
                         kernel.ops.len(),
@@ -163,6 +168,8 @@ pub struct KernelStep {
     /// The key of the last fused operation, which is what this pass produces.
     pub key: ContentHash,
     pub input: ImageHandle,
+    /// Images some ops read besides the main input, bound in this order.
+    pub extra_inputs: Vec<ImageHandle>,
     pub ops: Vec<KernelOp>,
     /// The generated compute shader. Parameters come from a storage buffer
     /// holding every op's `params`, concatenated in order.
@@ -184,6 +191,9 @@ pub struct KernelOp {
     pub wgsl: String,
     pub params: Vec<f32>,
     pub origin: Origin,
+    /// For each of the op's extra inputs (`e0`, `e1`, …), its index in the
+    /// kernel's `extra_inputs`.
+    pub extra: Vec<usize>,
 }
 
 /// Where an operation came from.
@@ -197,6 +207,8 @@ pub enum Origin {
     },
     /// Inserted by the compiler to meet a node's colour-space needs.
     Conversion { from: ColorSpace, to: ColorSpace },
+    /// A container combining its children, e.g. a timeline's tracks.
+    Composite { container: NodeId, mode: String },
 }
 
 impl std::fmt::Display for Origin {
@@ -206,6 +218,7 @@ impl std::fmt::Display for Origin {
                 compiled_id, name, ..
             } => write!(f, "{name:?} ({})", compiled_id.short()),
             Origin::Conversion { from, to } => write!(f, "inserted: {from} → {to}"),
+            Origin::Composite { mode, .. } => write!(f, "composite: {mode}"),
         }
     }
 }

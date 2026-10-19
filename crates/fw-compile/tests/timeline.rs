@@ -18,7 +18,8 @@ fn t(s: &str) -> Time {
 }
 
 /// Stills are 64×32 sRGB. `.mov` files are 24 fps video, 240 frames.
-/// `big.png` is the wrong size for the canvas.
+/// `big.png` is the wrong size for the canvas. Names containing "alpha" have
+/// an alpha channel; everything else is opaque.
 struct FakeMedia;
 
 impl MediaResolver for FakeMedia {
@@ -40,6 +41,7 @@ impl MediaResolver for FakeMedia {
             space: ColorSpace::SRGB,
             fingerprint: ContentHash::of_bytes(media.path.as_bytes()),
             frames,
+            opaque: !media.path.contains("alpha"),
         })
     }
 }
@@ -205,4 +207,88 @@ fn mismatched_media_sizes_are_refused_for_now() {
         "{err}"
     );
     assert!(err.to_string().contains("128×64"), "{err}");
+}
+
+fn loads(plan: &Plan) -> Vec<String> {
+    plan.steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::Load(l) => Some(l.path.display().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn set(s: &mut Sample, node: NodeId, param: &str, value: ParamValue) {
+    s.editor
+        .apply(
+            "Set",
+            vec![Command::SetParam {
+                node,
+                param: param.into(),
+                value: Some(Param::Constant(value)),
+            }],
+        )
+        .unwrap();
+}
+
+#[test]
+fn layers_with_alpha_composite_over_the_tracks_below() {
+    let mut s = Sample::new();
+    let (v1, v2) = (s.v1, s.v2);
+    s.clip("a.png", placement(v1, "0", "4"));
+    s.clip("title-alpha.png", placement(v2, "1", "2"));
+    let plan = s.plan("2");
+    println!("{}", plan.describe());
+    assert_eq!(loads(&plan), ["title-alpha.png", "a.png"]);
+    let composite = plan
+        .steps
+        .iter()
+        .find_map(|st| match st {
+            Step::Kernel(k) if k.ops.iter().any(|op| op.label == "composite normal") => Some(k),
+            _ => None,
+        })
+        .expect("a composite kernel");
+    assert_eq!(composite.extra_inputs.len(), 1);
+    validate(&composite.wgsl);
+
+    // What's underneath now matters to the result.
+    let opaque_top = s.plan("0.5");
+    assert_eq!(loads(&opaque_top), ["a.png"]);
+    let mut moved = Sample::new();
+    let (v1, v2) = (moved.v1, moved.v2);
+    moved.clip("b.png", placement(v1, "0", "4"));
+    moved.clip("title-alpha.png", placement(v2, "1", "2"));
+    assert_ne!(moved.plan("2").output_key(), plan.output_key());
+}
+
+#[test]
+fn an_opaque_full_frame_layer_hides_everything_below() {
+    let mut s = Sample::new();
+    let (v1, v2) = (s.v1, s.v2);
+    s.clip("under.png", placement(v1, "0", "4"));
+    let top = s.clip("over.png", placement(v2, "0", "4"));
+    assert_eq!(loads(&s.plan("1")), ["over.png"]);
+
+    // Fading the top layer makes the one below show through.
+    set(&mut s, top, "opacity", ParamValue::Float(50.0));
+    assert_eq!(loads(&s.plan("1")), ["over.png", "under.png"]);
+
+    // So does a mode other than Normal.
+    set(&mut s, top, "opacity", ParamValue::Float(100.0));
+    set(&mut s, top, "composite", ParamValue::Text("add".into()));
+    let plan = s.plan("1");
+    assert_eq!(loads(&plan), ["over.png", "under.png"]);
+    assert!(plan.describe().contains("composite add"));
+}
+
+fn validate(wgsl: &str) {
+    let module = naga::front::wgsl::parse_str(wgsl)
+        .unwrap_or_else(|e| panic!("{}\n{wgsl}", e.emit_to_string(wgsl)));
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .unwrap_or_else(|e| panic!("{e:?}\n{wgsl}"));
 }

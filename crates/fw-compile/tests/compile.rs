@@ -28,6 +28,7 @@ impl MediaResolver for FakeMedia {
             space: self.space,
             fingerprint: ContentHash::of_bytes(media.path.as_bytes()),
             frames: None,
+            opaque: true,
         })
     }
 }
