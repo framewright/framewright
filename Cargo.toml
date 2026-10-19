@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+exclude = ["spikes"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+fw-core = { path = "crates/fw-core" }
+fw-plugin = { path = "crates/fw-plugin" }
+fw-doc = { path = "crates/fw-doc" }
+
+blake3 = "1"
+imbl = { version = "6", features = ["serde"] }
+proptest = "1"
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: the default parser can be off by one ulp, which breaks exact round trips.
+serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
+tempfile = "3"
+thiserror = "2"
+ulid = { version = "1", features = ["serde"] }
+# Only fw-render may depend on wgpu. The UI toolkit choice decides the major version.
+wgpu = "30"

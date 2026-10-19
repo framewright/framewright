@@ -1,0 +1,18 @@
+[package]
+name = "fw-doc"
+description = "The Framewright document: nodes, containers, parameters, commands, undo and saving"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fw-core.workspace = true
+fw-plugin.workspace = true
+imbl.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true

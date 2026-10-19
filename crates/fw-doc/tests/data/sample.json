@@ -1,0 +1,83 @@
+{
+  "format": "framewright.project",
+  "format_version": 1,
+  "root": "0000000000000G000000000001",
+  "nodes": {
+    "0000000000000G000000000001": {
+      "type": "fw.graph",
+      "version": 1,
+      "name": "Main",
+      "graph": {
+        "nodes": {
+          "0000000000000G000000000002": {
+            "type": "test.source",
+            "version": 1,
+            "name": "Source",
+            "params": {
+              "file": {
+                "path": "media/cliffs.png"
+              }
+            }
+          },
+          "0000000000000G000000000003": {
+            "type": "test.gain",
+            "version": 1,
+            "name": "Gain",
+            "params": {
+              "gain": {
+                "keyframes": [
+                  {
+                    "t": "0",
+                    "v": 0.0
+                  },
+                  {
+                    "t": "3/2",
+                    "v": 1.5,
+                    "interp": "hold"
+                  }
+                ]
+              }
+            }
+          },
+          "0000000000000G000000000004": {
+            "type": "test.group",
+            "version": 1,
+            "name": "Group",
+            "graph": {
+              "nodes": {
+                "0000000000000G000000000005": {
+                  "type": "test.gain",
+                  "version": 1,
+                  "name": "Gain",
+                  "params": {
+                    "mode": "add"
+                  }
+                }
+              },
+              "edges": []
+            }
+          },
+          "0000000000000G000000000006": {
+            "type": "test.sink",
+            "version": 1,
+            "name": "Output"
+          }
+        },
+        "edges": [
+          {
+            "from": "0000000000000G000000000002:image",
+            "to": "0000000000000G000000000003:image"
+          },
+          {
+            "from": "0000000000000G000000000003:image",
+            "to": "0000000000000G000000000004:image"
+          },
+          {
+            "from": "0000000000000G000000000004:image",
+            "to": "0000000000000G000000000006:image"
+          }
+        ]
+      }
+    }
+  }
+}
