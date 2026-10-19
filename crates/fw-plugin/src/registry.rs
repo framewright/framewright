@@ -6,6 +6,7 @@ use std::sync::Arc;
 use fw_core::{ContentHash, KeyHasher};
 use serde_json::{Map, Value};
 
+use crate::audio::AudioBehaviour;
 use crate::desc::NodeTypeDesc;
 use crate::image::ImageBehaviour;
 
@@ -25,6 +26,7 @@ pub struct NodeType {
     pub desc: NodeTypeDesc,
     pub migrate: Option<MigrateFn>,
     pub image: Option<Arc<dyn ImageBehaviour>>,
+    pub audio: Option<Arc<dyn AudioBehaviour>>,
     /// Changes whenever the implementation might produce different pixels, so
     /// cached results from older code are never reused. Part of every cache key.
     pub impl_hash: ContentHash,
@@ -40,8 +42,15 @@ impl NodeType {
             desc,
             migrate: None,
             image: None,
+            audio: None,
             impl_hash,
         }
+    }
+
+    /// Adds real-time audio behaviour.
+    pub fn with_audio(mut self, behaviour: impl AudioBehaviour + 'static) -> NodeType {
+        self.audio = Some(Arc::new(behaviour));
+        self
     }
 
     /// Adds image behaviour. `implementation` is anything that changes when the

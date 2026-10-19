@@ -28,6 +28,20 @@ pub struct VideoInfo {
     /// for untagged video (Rec.709 primaries, BT.1886 display gamma).
     pub space: ColorSpace,
     pub has_alpha: bool,
+    /// The first frame's timestamp in stream ticks: source time 0.
+    pub first_pts: i64,
+    /// Seconds per timestamp tick.
+    pub tick: Time,
+}
+
+impl VideoInfo {
+    /// Source time 0, in seconds of the container's clock. Audio from the
+    /// same file uses it too, so picture and sound stay together.
+    pub fn origin(&self) -> Time {
+        self.tick
+            .checked_mul(Time::from_seconds(self.first_pts))
+            .unwrap_or(Time::ZERO)
+    }
 }
 
 fn decode_error(path: &Path) -> impl Fn(String) -> MediaError + use<> {
@@ -111,6 +125,8 @@ pub fn probe_video(path: &Path) -> Result<VideoInfo, MediaError> {
         frames,
         space: tagged_space(par.color_primaries, par.color_trc),
         has_alpha: has_alpha(par.format),
+        first_pts: first,
+        tick,
     })
 }
 
@@ -186,24 +202,13 @@ const FORWARD_LIMIT: i64 = 2;
 
 impl VideoReader {
     pub fn open(path: &Path) -> Result<VideoReader, MediaError> {
+        VideoReader::open_probed(path, &probe_video(path)?)
+    }
+
+    /// Opens a file already probed, without reading it again.
+    pub fn open_probed(path: &Path, info: &VideoInfo) -> Result<VideoReader, MediaError> {
         let err = decode_error(path);
-        let first_pts = {
-            // A cheap demux pass for the first timestamp; probe_video reads them all.
-            let (mut input, stream) = open_input(path)?;
-            let mut first = i64::MAX;
-            let mut seen = 0;
-            while let Some(packet) = input.read_packet().map_err(|e| err(e.to_string()))? {
-                if packet.stream_index as usize == stream && packet.pts != ffi::AV_NOPTS_VALUE {
-                    first = first.min(packet.pts);
-                    seen += 1;
-                    // B-frames can put the earliest timestamp a few packets in.
-                    if seen > 16 {
-                        break;
-                    }
-                }
-            }
-            if first == i64::MAX { 0 } else { first }
-        };
+        let first_pts = info.first_pts;
         let (input, stream) = open_input(path)?;
         let (par, time_base) = {
             let s = &input.streams()[stream];

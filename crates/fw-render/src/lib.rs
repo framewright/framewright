@@ -31,7 +31,7 @@ pub enum RenderError {
 }
 
 /// Counters for tests and `fw render --stats`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Stats {
     pub renders: u64,
     /// Renders answered from the RAM cache without touching the GPU.
@@ -39,6 +39,12 @@ pub struct Stats {
     pub decodes: u64,
     pub kernels: u64,
     pub pipelines_built: u64,
+    /// Time spent decoding media (inside the decoder), in total.
+    pub decode_time: std::time::Duration,
+    /// Time spent converting and uploading pixels to the GPU, in total.
+    pub upload_time: std::time::Duration,
+    /// Time spent waiting for the GPU and reading results back, in total.
+    pub readback_time: std::time::Duration,
 }
 
 pub struct Renderer {
@@ -167,7 +173,9 @@ impl Renderer {
             };
             textures.insert(step.output(), texture);
         }
+        let started = std::time::Instant::now();
         let image = self.read_back(encoder, &textures[&plan.output]);
+        self.stats.readback_time += started.elapsed();
         if let Some(error) = pollster::block_on(scope.pop()) {
             return Err(RenderError::Gpu(error.to_string()));
         }
@@ -239,7 +247,9 @@ impl Renderer {
                     path: load.path.display().to_string(),
                     message,
                 };
+                let started = std::time::Instant::now();
                 let mut image = decoder.decode(load).map_err(error)?;
+                self.stats.decode_time += started.elapsed();
                 if (image.width, image.height) != (load.width, load.height) {
                     return Err(error(format!(
                         "expected {}×{}, decoded {}×{}",
@@ -252,6 +262,7 @@ impl Renderer {
                 image
             }
         };
+        let started = std::time::Instant::now();
         let texture = self.texture(image.width, image.height);
         let halves: Vec<u8> = image
             .pixels
@@ -268,6 +279,7 @@ impl Renderer {
             },
             texture.size(),
         );
+        self.stats.upload_time += started.elapsed();
         Ok(texture)
     }
 

@@ -197,6 +197,13 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Automatic plugin latency compensation in the compiler.
 - **[Decided]** **One automation system.** Audio automation and video keyframes are the same animated-parameter mechanism.
 - **[Decided]** CLAP plugin hosting, run out of process or sandboxed. LV2 and VST3 later.
+- **[Proposed]** (from step 2) **Audio engine details:**
+  - A node's audio behaviour names the parameters it reads; the engine resolves them and passes plain numbers. Processors are created and prepared off the audio thread.
+  - Each playing clip streams through its own lock-free ring buffer, filled by one streaming thread. Voice sets reach the audio thread through a lock-free queue, and old ones come back to be freed elsewhere. Tests prove the mixer never allocates.
+  - The master clock counts samples written, minus the device's reported latency, interpolated between blocks (capped at 50 ms so a stalled device stalls the picture rather than letting it drift).
+  - Resampling uses FFmpeg's swresample inside `fw-media`, rather than `rubato`, because FFmpeg already decodes the audio.
+  - Parameters are constant per clip for now. TODO: automation resolved per block.
+- **[Proposed]** (from step 2) **Playback details:** the frame shown is always the one the clock says is due. A render thread renders ahead, aiming as far ahead as a frame takes to render (with 25% to spare). A missed frame holds the last one and is counted as dropped. Playback starts once the first frame is ready. TODO: use plan diffs to work out which time ranges an edit invalidates, for the playback cache.
 
 ## 9. Document, persistence and undo
 
@@ -299,7 +306,7 @@ fw-app       UI
 4. Shader-node plugins, to prove early that built-ins use the plugin API.
 5. Then widen: LayerStack and Photo documents, masks, text, mixer, 3D.
 
-**[Decided]** Process guardrails: a performance budget table (named workload, statistic, limit), synthetic test media generated with FFmpeg, no benchmark or qualification code in the shipping binary, no files over about 1.5k lines, plain names rather than invented subsystem names, and `TODO` rather than euphemisms like "forthcoming".
+**[Decided]** Process guardrails: a performance budget table (`docs/performance.md`, measured by `fw-bench`) (named workload, statistic, limit), synthetic test media generated with FFmpeg, no benchmark or qualification code in the shipping binary, no files over about 1.5k lines, plain names rather than invented subsystem names, and `TODO` rather than euphemisms like "forthcoming".
 
 ## 15. Lessons from the old prototype
 

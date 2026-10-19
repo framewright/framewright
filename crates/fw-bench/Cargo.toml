@@ -1,0 +1,18 @@
+[package]
+name = "fw-bench"
+description = "Framewright's benchmark harness and performance budgets. Never shipped."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fw-audio.workspace = true
+fw-compile.workspace = true
+fw-core.workspace = true
+fw-doc.workspace = true
+fw-media.workspace = true
+fw-ops.workspace = true
+fw-playback.workspace = true
+fw-plugin.workspace = true
+fw-render.workspace = true
+fw-testmedia.workspace = true

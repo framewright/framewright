@@ -1,0 +1,21 @@
+[package]
+name = "fw-audio"
+description = "Framewright's real-time audio engine: mixing, streaming and the master clock"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+cpal = "0.18"
+fw-compile.workspace = true
+fw-core.workspace = true
+fw-media.workspace = true
+fw-plugin.workspace = true
+rtrb = "0.4"
+thiserror.workspace = true
+
+[dev-dependencies]
+assert_no_alloc = "1"
+fw-doc.workspace = true
+fw-ops.workspace = true
+fw-testmedia.workspace = true

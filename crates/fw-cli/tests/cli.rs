@@ -184,3 +184,28 @@ fn video_frames_render_identically_across_processes() {
     let plan = fw(&["inspect", &project, "--time", "2.5"]);
     assert!(plan.contains("frame at"), "{plan}");
 }
+
+#[test]
+fn plays_a_timeline_against_the_clock() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = video_project(dir.path());
+    let report = fw(&[
+        "play",
+        &project,
+        "--from",
+        "1",
+        "--seconds",
+        "1.5",
+        "--no-audio",
+    ]);
+    let summary = report.lines().last().unwrap();
+    assert!(summary.contains("0 failed"), "{report}");
+    // "played 1.5 s: 37 frames shown, 0 dropped, 0 failed"
+    let shown: u64 = summary
+        .split(": ")
+        .nth(1)
+        .and_then(|rest| rest.split(" frames shown").next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{report}"));
+    assert!(shown >= 30, "{report}");
+}

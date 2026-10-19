@@ -7,8 +7,11 @@
 //! TODO: video and audio through a private FFmpeg build (design §12), RAW
 //! stills, ICC profiles and PNG colour chunks.
 
+mod audio;
 mod project;
 mod video;
+
+pub use audio::{AudioReader, CHANNELS, has_audio};
 
 pub use video::{VideoInfo, VideoReader, probe_video};
 
@@ -41,6 +44,8 @@ pub enum Format {
     Exr,
     /// Anything FFmpeg reads as video. Read-only for now.
     Video,
+    /// Sound with no picture. Read-only for now.
+    Audio,
 }
 
 impl Format {
@@ -53,6 +58,9 @@ impl Format {
             "mov" | "mp4" | "m4v" | "mkv" | "webm" | "mxf" | "avi" | "mts" | "m2ts" => {
                 Some(Format::Video)
             }
+            "wav" | "flac" | "mp3" | "aac" | "m4a" | "ogg" | "opus" | "aif" | "aiff" => {
+                Some(Format::Audio)
+            }
             _ => None,
         }
     }
@@ -61,7 +69,7 @@ impl Format {
     pub fn natural_space(self) -> ColorSpace {
         match self {
             Format::Png | Format::Jpeg => ColorSpace::SRGB,
-            Format::Video => ColorSpace::REC709_DISPLAY,
+            Format::Video | Format::Audio => ColorSpace::REC709_DISPLAY,
             Format::Exr => ColorSpace::LINEAR_REC709,
         }
     }
@@ -111,6 +119,7 @@ pub fn probe(path: &Path) -> Result<Probe, MediaError> {
             let video = probe_video(path)?;
             (video.width, video.height, video.space, video.has_alpha)
         }
+        Format::Audio => (0, 0, ColorSpace::REC709_DISPLAY, false),
         Format::Png | Format::Jpeg => {
             use image::ImageDecoder as _;
             let decoder = image::ImageReader::open(path)
@@ -159,6 +168,10 @@ pub fn read_image(path: &Path) -> Result<(RgbaImage, ColorSpace), MediaError> {
         message,
     };
     match format_of(path)? {
+        Format::Audio => Err(MediaError::Decode {
+            path: path.to_owned(),
+            message: "this file has no picture".into(),
+        }),
         Format::Video => {
             let mut reader = VideoReader::open(path)?;
             let space = probe_video(path)?.space;

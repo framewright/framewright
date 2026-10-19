@@ -8,6 +8,7 @@
 //! 4. Key every operation by exactly what determines its output.
 //! 5. Fuse chains of per-pixel operations into single GPU passes.
 
+mod audio;
 mod codegen;
 mod frames;
 mod lower;
@@ -19,6 +20,7 @@ use fw_core::{ColorSpace, ContentHash, NodeId, Time};
 use fw_doc::Document;
 use fw_plugin::{MediaRef, Quality, Registry};
 
+pub use audio::{AudioPlan, Voice, compile_audio};
 pub use frames::FrameTimes;
 pub use plan::{FillStep, KernelOp, KernelStep, LoadStep, Origin, Plan, Step};
 
@@ -38,6 +40,11 @@ pub struct MediaInfo {
     pub frames: Option<FrameTimes>,
     /// The file has no alpha channel, so every pixel is opaque.
     pub opaque: bool,
+    /// The file has sound.
+    pub has_audio: bool,
+    /// Source time 0 on the file's own clock, shared by its picture and
+    /// sound. `None` when the file has no picture to anchor it.
+    pub origin: Option<Time>,
 }
 
 pub trait MediaResolver {

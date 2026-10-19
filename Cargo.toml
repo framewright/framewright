@@ -15,6 +15,8 @@ fw-doc = { path = "crates/fw-doc" }
 fw-ops = { path = "crates/fw-ops" }
 fw-compile = { path = "crates/fw-compile" }
 fw-media = { path = "crates/fw-media" }
+fw-audio = { path = "crates/fw-audio" }
+fw-playback = { path = "crates/fw-playback" }
 fw-testmedia = { path = "crates/fw-testmedia" }
 fw-render = { path = "crates/fw-render" }
 

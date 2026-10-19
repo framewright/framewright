@@ -29,6 +29,8 @@ impl MediaResolver for FakeMedia {
             fingerprint: ContentHash::of_bytes(media.path.as_bytes()),
             frames: None,
             opaque: true,
+            has_audio: false,
+            origin: None,
         })
     }
 }

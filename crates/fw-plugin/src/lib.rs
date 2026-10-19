@@ -4,11 +4,13 @@
 //! shader plugins can provide one as easily as Rust code. Built-in nodes
 //! register through the same [`Registry`] as plugins.
 
+pub mod audio;
 pub mod desc;
 pub mod image;
 pub mod registry;
 pub mod value;
 
+pub use audio::{AudioBehaviour, AudioBlock, AudioProcessor};
 pub use desc::{
     CLIP_TYPE, ChoiceOption, ContainerKind, GRAPH_TYPE, HandleKind, NodeTypeDesc, OUTPUT_TYPE,
     ParamDesc, ParamKind, PortDesc, PortType, TIMELINE_TYPE, Unit,

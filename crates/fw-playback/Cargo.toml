@@ -1,0 +1,19 @@
+[package]
+name = "fw-playback"
+description = "Framewright's playback pipeline: frames chosen by the master clock, rendered ahead"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fw-audio.workspace = true
+fw-compile.workspace = true
+fw-core.workspace = true
+fw-doc.workspace = true
+fw-media.workspace = true
+fw-plugin.workspace = true
+fw-render.workspace = true
+
+[dev-dependencies]
+fw-ops.workspace = true
+fw-testmedia.workspace = true

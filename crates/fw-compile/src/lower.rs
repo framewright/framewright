@@ -564,6 +564,9 @@ impl PlanBuilder for NodeBuilder<'_, '_> {
         space: Option<fw_core::ColorSpace>,
     ) -> Result<ImageHandle, NodeError> {
         let found = self.lowering.media.probe(media).map_err(NodeError)?;
+        if found.width == 0 || found.height == 0 {
+            return Err(NodeError(format!("{} has no picture", media.path)));
+        }
         let space = space.unwrap_or(found.space);
         let frame = match &found.frames {
             Some(frames) => Some(

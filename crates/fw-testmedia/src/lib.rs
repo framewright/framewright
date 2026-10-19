@@ -125,6 +125,43 @@ pub fn levels_yuv() -> PathBuf {
     ensure(&LEVELS_YUV)
 }
 
+/// Ten seconds of 1080p 23.976 fps H.264 4:2:0 (long GOP, B-frames) with a
+/// stereo tone: an ordinary camera-like file, for benchmarks.
+const HD_H264: Recipe = Recipe {
+    name: "hd-h264.mp4",
+    args: &[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=s=1920x1080:r=24000/1001:d=10",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:sample_rate=48000:d=10",
+        "-vf",
+        "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-pix_fmt",
+        "yuv420p",
+        "-g",
+        "48",
+        "-bf",
+        "2",
+        "-c:a",
+        "aac",
+        "-ac",
+        "2",
+        "-shortest",
+    ],
+};
+
+pub fn hd_h264() -> PathBuf {
+    ensure(&HD_H264)
+}
+
 pub fn count_24fps() -> PathBuf {
     ensure(&COUNT_CFR)
 }

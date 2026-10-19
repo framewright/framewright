@@ -54,6 +54,21 @@ enum Cmd {
         #[arg(long)]
         wgsl: bool,
     },
+    /// Play a project: sound through the default audio device, which sets the
+    /// pace, and pictures rendered ahead and chosen by it. Reports frames
+    /// shown and dropped, audio underruns and the A/V offset every second.
+    Play {
+        project: PathBuf,
+        /// Where to start, in seconds.
+        #[arg(long, default_value = "0")]
+        from: Time,
+        /// How long to play, in seconds.
+        #[arg(long, default_value = "5")]
+        seconds: f64,
+        /// Don't open an audio device; the wall clock sets the pace.
+        #[arg(long)]
+        no_audio: bool,
+    },
     /// Write an example project (a gradient through Exposure) into a folder.
     Example { folder: PathBuf },
 }
@@ -72,6 +87,12 @@ fn main() -> ExitCode {
             out,
             wgsl,
         } => inspect(&project, time, out.as_deref(), wgsl),
+        Cmd::Play {
+            project,
+            from,
+            seconds,
+            no_audio,
+        } => play(&project, from, seconds, no_audio),
         Cmd::Example { folder } => example(&folder),
     };
     match result {
@@ -85,7 +106,7 @@ fn main() -> ExitCode {
 
 fn output_format(out: &Path) -> Result<Format, String> {
     match Format::of(out) {
-        Some(Format::Jpeg | Format::Video) | None => Err(format!(
+        Some(Format::Jpeg | Format::Video | Format::Audio) | None => Err(format!(
             "{}: can only write .exr or .png files",
             out.display()
         )),
@@ -133,7 +154,7 @@ fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(
             }
             fw_media::write_png(out, &image, sixteen_bit)
         }
-        Format::Jpeg | Format::Video => unreachable!("rejected by output_format"),
+        Format::Jpeg | Format::Video | Format::Audio => unreachable!("rejected by output_format"),
     }
     .map_err(|e| e.to_string())?;
     let written = started.elapsed() - setup - rendered;
@@ -153,6 +174,129 @@ fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(
         written.as_millis()
     );
     Ok(())
+}
+
+fn play(project: &Path, from: Time, seconds: f64, no_audio: bool) -> Result<(), String> {
+    use fw_audio::{AudioEngine, MasterClock, WallClock};
+    use fw_playback::{DocumentFrames, Player};
+
+    let registry = Arc::new(fw_ops::builtin_registry());
+    let doc = fw_doc::save::load(project, &registry).map_err(|e| e.to_string())?;
+    let folder = project.parent().unwrap_or(Path::new("."));
+    let (rate, sample_rate) = match doc.timeline(doc.root()) {
+        Some(t) => (t.settings.rate, t.settings.sample_rate),
+        None => (Time::from_seconds(24), 48000),
+    };
+    let plan = fw_compile::compile_audio(&doc, &registry, &ProjectMedia::new(folder))
+        .map_err(|e| e.to_string())?;
+
+    // When sound plays, its sample count is the master clock.
+    let from_sample = from.sample_index(sample_rate).map_err(|e| e.to_string())?;
+    let mut audio = None;
+    let wall = Arc::new(WallClock::starting_at(from));
+    let clock: Arc<dyn MasterClock> = if no_audio || plan.voices.is_empty() {
+        wall.clone()
+    } else {
+        let (engine, mixer) = AudioEngine::new(sample_rate, fw_audio::output::MAX_FRAMES);
+        match fw_audio::start_output(mixer, engine.clock().clone(), sample_rate) {
+            Ok(output) => {
+                println!("audio: {} at {} Hz", output.device, output.rate);
+                // Hold at the start until the sound begins.
+                engine.clock().advance_to(from_sample);
+                let clock: Arc<dyn MasterClock> = engine.clock().clone();
+                audio = Some((engine, output));
+                clock
+            }
+            Err(e) => {
+                eprintln!("fw: {e}; playing pictures only, timed by the wall clock");
+                wall.clone()
+            }
+        }
+    };
+
+    let gpu = Arc::new(Gpu::new().map_err(|e| e.to_string())?);
+    println!(
+        "video: {} at {} fps on {}",
+        project.display(),
+        rate,
+        gpu.describe()
+    );
+    let mut options = Options::at(from);
+    options.quality = fw_plugin::Quality::Draft;
+    let frames = DocumentFrames {
+        doc,
+        registry,
+        media: ProjectMedia::new(folder),
+        renderer: Renderer::new(gpu, DEFAULT_CACHE_BYTES),
+        rate,
+        options,
+    };
+    let mut player = Player::new(Box::new(frames), clock.clone(), rate, 6);
+
+    // Start with the first frame ready, then let the clock run.
+    player.tick();
+    let first = from.frame_index(rate).map_err(|e| e.to_string())?;
+    if !player.wait_for(first, std::time::Duration::from_secs(10)) {
+        return Err("the first frame took longer than 10 s to render".into());
+    }
+    match &mut audio {
+        Some((engine, _)) => engine.play(&plan, from_sample).map_err(|e| e.to_string())?,
+        None => wall.start(),
+    }
+    let end = from.as_f64() + seconds;
+    let mut next_report = from.as_f64() + 1.0;
+    let mut last = player.stats().clone();
+    let mut offsets: Vec<f64> = vec![];
+    while clock.now().as_f64() < end {
+        if let Some(shown) = player.tick() {
+            // How far into its own frame the clock is when the frame appears.
+            offsets.push((clock.now().as_f64() - shown.time.as_f64()) * 1000.0);
+        }
+        let now = clock.now().as_f64();
+        if now >= next_report {
+            let stats = player.stats();
+            let underruns = audio
+                .as_ref()
+                .map(|(e, _)| {
+                    e.stats()
+                        .underruns
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                })
+                .unwrap_or(0);
+            let (mean, worst) = summarise(&offsets);
+            println!(
+                "{now:7.2}s  shown {:3}  dropped {:3}  audio underruns {underruns}  A/V offset mean {mean:5.1} ms, worst {worst:5.1} ms",
+                stats.shown - last.shown,
+                stats.dropped - last.dropped,
+            );
+            last = stats.clone();
+            offsets.clear();
+            next_report += 1.0;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let stats = player.stats();
+    println!(
+        "played {seconds} s: {} frames shown, {} dropped, {} failed",
+        stats.shown, stats.dropped, stats.errors
+    );
+    if let Some((engine, _output)) = &mut audio {
+        engine.stop();
+        for e in engine.take_errors() {
+            eprintln!("fw: audio: {e}");
+        }
+    }
+    Ok(())
+}
+
+/// Mean and largest of a set of millisecond offsets.
+fn summarise(offsets: &[f64]) -> (f64, f64) {
+    if offsets.is_empty() {
+        return (0.0, 0.0);
+    }
+    let mean = offsets.iter().sum::<f64>() / offsets.len() as f64;
+    let worst = offsets.iter().fold(0f64, |m, v| m.max(v.abs()));
+    (mean, worst)
 }
 
 fn inspect(project: &Path, time: Time, out: Option<&Path>, wgsl: bool) -> Result<(), String> {

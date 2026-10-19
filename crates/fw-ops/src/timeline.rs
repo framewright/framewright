@@ -4,9 +4,9 @@
 //! on a timeline with no graph inside: "media → output", stored compactly.
 
 use fw_plugin::{
-    CLIP_TYPE, ContainerKind, ImageBehaviour, ImageHandle, NodeError, NodeType, NodeTypeDesc,
-    ParamDesc, PixelOp, PlanBuilder, PortDesc, PortType, Request, ResolvedParams, TIMELINE_TYPE,
-    Unit,
+    AudioBehaviour, AudioBlock, AudioProcessor, CLIP_TYPE, ContainerKind, ImageBehaviour,
+    ImageHandle, NodeError, NodeType, NodeTypeDesc, ParamDesc, PixelOp, PlanBuilder, PortDesc,
+    PortType, Request, ResolvedParams, TIMELINE_TYPE, Unit,
 };
 
 use crate::color::{SPACE_CHOICES, space_from_choice};
@@ -40,6 +40,9 @@ pub fn clip_type() -> NodeType {
                 .soft_range(0.0, 100.0)
                 .hard_range(0.0, 100.0),
             ParamDesc::choice("composite", "Composite", &COMPOSITE_CHOICES, "normal"),
+            ParamDesc::float("volume", "Volume", Unit::Decibels, 0.0)
+                .soft_range(-60.0, 12.0)
+                .hard_range(-120.0, 24.0),
         ],
         // Time reaches the cache key through the frame the load picks, so a
         // still image keys the same at every moment.
@@ -47,7 +50,9 @@ pub fn clip_type() -> NodeType {
         container: None,
     };
     // TODO: "Open in Compose" turns a plain clip into a Graph container in place.
-    NodeType::new(desc).with_image(Clip, "clip r2")
+    NodeType::new(desc)
+        .with_image(Clip, "clip r2")
+        .with_audio(ClipAudio)
 }
 
 struct Clip;
@@ -82,3 +87,31 @@ impl ImageBehaviour for Clip {
 /// How a clip combines with the tracks below it.
 /// TODO: multiply, screen and the other common modes.
 pub const COMPOSITE_CHOICES: [(&str, &str); 2] = [("normal", "Normal"), ("add", "Add")];
+
+/// A clip's sound: its media's audio at the clip's Volume.
+struct ClipAudio;
+
+impl AudioBehaviour for ClipAudio {
+    fn create(&self) -> Box<dyn AudioProcessor> {
+        Box::new(Gain)
+    }
+
+    fn params(&self) -> Vec<String> {
+        vec!["volume".into()]
+    }
+}
+
+/// Scales samples by a level in decibels (the first parameter).
+/// TODO: smooth level changes across blocks so automation doesn't click.
+struct Gain;
+
+impl AudioProcessor for Gain {
+    fn prepare(&mut self, _sample_rate: u32, _max_frames: usize) {}
+
+    fn process(&mut self, block: &mut AudioBlock<'_>) {
+        let gain = 10f32.powf(block.params.first().copied().unwrap_or(0.0) / 20.0);
+        for (out, input) in block.output.iter_mut().zip(block.input) {
+            *out = input * gain;
+        }
+    }
+}
