@@ -1,2 +1,3 @@
 target/
-spikes/target/
+# Throwaway toolkit bake-off; kept on disk, never committed.
+spikes/
