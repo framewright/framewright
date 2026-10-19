@@ -10,8 +10,7 @@ use serde_json::value::RawValue;
 
 use crate::param::Param;
 
-/// The type id of the Graph container.
-pub const GRAPH_TYPE: &str = "fw.graph";
+pub use fw_plugin::GRAPH_TYPE;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

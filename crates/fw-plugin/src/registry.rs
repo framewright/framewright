@@ -3,9 +3,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use fw_core::{ContentHash, KeyHasher};
 use serde_json::{Map, Value};
 
 use crate::desc::NodeTypeDesc;
+use crate::image::ImageBehaviour;
 
 /// Upgrades saved parameters from `from_version` to the current version, in place.
 pub type MigrateFn = fn(from_version: u32, params: &mut Map<String, Value>) -> Result<(), String>;
@@ -22,14 +24,40 @@ pub enum RegistryError {
 pub struct NodeType {
     pub desc: NodeTypeDesc,
     pub migrate: Option<MigrateFn>,
+    pub image: Option<Arc<dyn ImageBehaviour>>,
+    /// Changes whenever the implementation might produce different pixels, so
+    /// cached results from older code are never reused. Part of every cache key.
+    pub impl_hash: ContentHash,
 }
 
 impl NodeType {
     pub fn new(desc: NodeTypeDesc) -> NodeType {
+        let impl_hash = KeyHasher::new("fw.impl")
+            .str(&desc.id)
+            .u32(desc.version)
+            .finish();
         NodeType {
             desc,
             migrate: None,
+            image: None,
+            impl_hash,
         }
+    }
+
+    /// Adds image behaviour. `implementation` is anything that changes when the
+    /// output could change: shader source, a revision string, a build hash.
+    pub fn with_image(
+        mut self,
+        behaviour: impl ImageBehaviour + 'static,
+        implementation: &str,
+    ) -> NodeType {
+        self.image = Some(Arc::new(behaviour));
+        self.impl_hash = KeyHasher::new("fw.impl")
+            .str(&self.desc.id)
+            .u32(self.desc.version)
+            .str(implementation)
+            .finish();
+        self
     }
 
     pub fn with_migration(mut self, migrate: MigrateFn) -> NodeType {

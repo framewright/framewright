@@ -199,7 +199,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Node payloads are structured data, never JSON stored as bytes.
 - **[Decided]** Atomic saves (write a temp file, fsync, rename, fsync the directory), rolling backups, and tests that interrupt a save at each step.
 - **[Decided]** **Project documents are pretty-printed JSON** with stable key order and tagged enums. Unknown nodes are held byte-exactly via `serde_json::RawValue`. Large binary data (paint strokes, caches, thumbnails) lives in sidecar files referenced by content hash, never embedded; optional zstd compression may come later. **Hand-written files** (plugin manifests, app config) are TOML. The format sits behind one module.
-- **[Proposed]** (from step 1) **File layout details:**
+- **[Decided]** (from step 1) **File layout details:**
   - Containers nest in the file the same way they nest in the document, so an unknown container carries its whole contents inside its preserved bytes.
   - Parameters are saved only once set, as natural JSON values (`"exposure": 0.5`). Animation is saved as `{"keyframes": [...]}`.
   - Times are exact strings (`"3/2"`). Connections are `"<node id>:<port>"` strings.
@@ -271,7 +271,7 @@ fw-cli       headless render/inspect
 fw-app       UI
 ```
 
-**[Proposed]** (from step 1) `fw-plugin` sits directly above `fw-core`, because the document needs parameter schemas to check edits and decide which nodes are unknown. Plugin hosts (shader nodes, WASM, CLAP) get their own crates later, so the document never pulls in wasmtime.
+**[Decided]** (from step 1) `fw-plugin` sits directly above `fw-core`, because the document needs parameter schemas to check edits and decide which nodes are unknown. Plugin hosts (shader nodes, WASM, CLAP) get their own crates later, so the document never pulls in wasmtime.
 
 **[Decided]** Build a thin slice through every layer first:
 

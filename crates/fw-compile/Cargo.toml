@@ -1,0 +1,16 @@
+[package]
+name = "fw-compile"
+description = "Compiles a Framewright document into a flat, fused, cache-keyed render plan"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fw-core.workspace = true
+fw-doc.workspace = true
+fw-plugin.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+fw-ops.workspace = true
+naga.workspace = true

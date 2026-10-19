@@ -4,6 +4,12 @@ use serde::Serialize;
 
 use crate::value::{ParamValue, ValueError};
 
+/// The type id of the Graph container. The document's root is one.
+pub const GRAPH_TYPE: &str = "fw.graph";
+
+/// The type id of the Output node, which marks what a Graph container delivers.
+pub const OUTPUT_TYPE: &str = "fw.output";
+
 /// Everything the engine and UI need to know about a node type without running it.
 ///
 /// The parameter schema is the single source of truth for the inspector,

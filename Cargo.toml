@@ -12,6 +12,10 @@ publish = false
 fw-core = { path = "crates/fw-core" }
 fw-plugin = { path = "crates/fw-plugin" }
 fw-doc = { path = "crates/fw-doc" }
+fw-ops = { path = "crates/fw-ops" }
+fw-compile = { path = "crates/fw-compile" }
+fw-media = { path = "crates/fw-media" }
+fw-render = { path = "crates/fw-render" }
 
 blake3 = "1"
 imbl = { version = "6", features = ["serde"] }
@@ -22,5 +26,7 @@ serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 tempfile = "3"
 thiserror = "2"
 ulid = { version = "1", features = ["serde"] }
+# naga is only for validating generated shaders in tests; keep it on the same major as wgpu.
+naga = { version = "30", features = ["wgsl-in"] }
 # Only fw-render may depend on wgpu. The UI toolkit choice decides the major version.
 wgpu = "30"

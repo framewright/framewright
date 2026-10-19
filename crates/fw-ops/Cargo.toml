@@ -1,0 +1,10 @@
+[package]
+name = "fw-ops"
+description = "Framewright's built-in nodes, registered through the same API as plugins"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fw-core.workspace = true
+fw-plugin.workspace = true
