@@ -1,0 +1,21 @@
+[package]
+name = "fw-render"
+description = "Framewright's GPU executor: runs compiled plans on an engine-owned wgpu device"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fw-compile.workspace = true
+fw-core.workspace = true
+fw-plugin.workspace = true
+half = "2"
+pollster = "0.4"
+thiserror.workspace = true
+wgpu.workspace = true
+
+[dev-dependencies]
+fw-doc.workspace = true
+fw-media.workspace = true
+fw-ops.workspace = true
+tempfile.workspace = true

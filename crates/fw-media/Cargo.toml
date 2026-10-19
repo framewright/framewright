@@ -1,0 +1,17 @@
+[package]
+name = "fw-media"
+description = "Framewright media I/O: reading and writing image files"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fw-core.workspace = true
+exr = "1"
+fw-compile.workspace = true
+fw-plugin.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

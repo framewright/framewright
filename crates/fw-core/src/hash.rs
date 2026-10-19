@@ -19,6 +19,13 @@ impl ContentHash {
         ContentHash(*blake3::hash(bytes).as_bytes())
     }
 
+    /// Hashes everything `reader` yields, streaming.
+    pub fn of_reader(mut reader: impl std::io::Read) -> std::io::Result<ContentHash> {
+        let mut hasher = blake3::Hasher::new();
+        std::io::copy(&mut reader, &mut hasher)?;
+        Ok(ContentHash(*hasher.finalize().as_bytes()))
+    }
+
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }

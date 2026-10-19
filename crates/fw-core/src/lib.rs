@@ -6,10 +6,12 @@ pub mod color;
 pub mod geom;
 pub mod hash;
 pub mod id;
+pub mod image;
 pub mod time;
 
 pub use color::{ColorSpace, Primaries, Transfer};
 pub use geom::{Rect, Vec2};
 pub use hash::{ContentHash, KeyHasher};
 pub use id::{IdGen, NodeId};
+pub use image::RgbaImage;
 pub use time::{Time, TimeError};

@@ -38,6 +38,13 @@ pub trait MediaResolver {
     fn probe(&self, media: &MediaRef) -> Result<MediaInfo, String>;
 }
 
+/// Decodes the file a load step names, for the renderer. Kept beside
+/// [`MediaResolver`] so one media adapter can serve both.
+pub trait Decoder {
+    /// Straight-alpha pixels, `load.width` × `load.height`.
+    fn decode(&self, load: &LoadStep) -> Result<fw_core::RgbaImage, String>;
+}
+
 #[derive(Debug, Clone)]
 pub struct Options {
     pub time: Time,
