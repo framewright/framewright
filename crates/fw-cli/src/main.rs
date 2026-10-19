@@ -107,20 +107,20 @@ fn compile(project: &Path, time: Time, out: Option<&Path>) -> Result<(Plan, Proj
 fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(), String> {
     let format = output_format(out)?;
     let (plan, media) = compile(project, time, Some(out))?;
+    if format == Format::Exr && plan.output_space.transfer != Transfer::Linear {
+        return Err(format!(
+            "the Output node delivers {}, which EXR can't hold; choose a linear space",
+            plan.output_space
+        ));
+    }
     let started = Instant::now();
     let gpu = Arc::new(Gpu::new().map_err(|e| e.to_string())?);
+    let setup = started.elapsed();
     let mut renderer = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES);
     let image: Arc<RgbaImage> = renderer.render(&plan, &media).map_err(|e| e.to_string())?;
+    let rendered = started.elapsed() - setup;
     match format {
-        Format::Exr => {
-            if plan.output_space.transfer != Transfer::Linear {
-                return Err(format!(
-                    "the Output node delivers {}, which EXR can't hold; choose a linear space",
-                    plan.output_space
-                ));
-            }
-            fw_media::write_exr(out, &image, plan.output_space)
-        }
+        Format::Exr => fw_media::write_exr(out, &image, plan.output_space),
         Format::Png => {
             if plan.output_space.transfer == Transfer::Linear {
                 eprintln!(
@@ -133,15 +133,21 @@ fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(
         Format::Jpeg => unreachable!("rejected by output_format"),
     }
     .map_err(|e| e.to_string())?;
+    let written = started.elapsed() - setup - rendered;
     println!(
-        "{}: {}×{} {} at {}s, on {} in {} ms",
+        "{}: {}×{} {} at {}s on {}",
         out.display(),
         image.width,
         image.height,
         plan.output_space,
         time,
         gpu.describe(),
-        started.elapsed().as_millis()
+    );
+    println!(
+        "  GPU setup {} ms, decode and render {} ms, encode and write {} ms",
+        setup.as_millis(),
+        rendered.as_millis(),
+        written.as_millis()
     );
     Ok(())
 }
