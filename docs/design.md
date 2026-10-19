@@ -219,7 +219,8 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 
 - **[Decided]** The engine is a library that runs headless, driven equally by the UI, scripts, the CLI and tests. The UI holds no document logic.
 - **[Decided]** Deterministic UI launch modes (open the app in a fixed state for screenshots), useful for design iteration and visual tests.
-- **[Open]** **UI toolkit: iced or egui.** Decide with a bake-off: build the Edit page shell in both, on an engine-owned wgpu device, with docking and a 10-bit texture in the viewport, then pick by using them. GPUI is ruled out (see §7). Whichever we choose, we build our own design-system layer on top.
+- **[Decided]** **UI toolkit: egui**, chosen after the bake-off (`spikes/bakeoff-report.md`) and by using both. We drive `egui`, `egui-winit` and `egui-wgpu` ourselves on our own window and the engine's device; eframe always picks an 8-bit surface, so it is not used. Docking uses `egui_tiles`. Our design-system layer sits on top. The engine's wgpu version follows egui-wgpu's (30 today). Heavy engine work is submitted in slices, the only way to keep 60 fps with zero-copy display on a single queue.
+- **[Decided]** **A custom title bar:** no system decorations. The top bar holds the logo, menus, project name, Export, and minimise, maximise and close. The window moves and resizes through the compositor (winit `drag_window` / `drag_resize_window`), so snapping still works. We draw our own resize borders and cursors.
 
 ### 10.1 Process model
 
@@ -310,6 +311,5 @@ The old code is at `~/projects/video-editor`, with a GPUI fork at `~/projects/fr
 
 ## 16. Open questions
 
-- UI toolkit: iced vs egui (bake-off).
 - How paint and retouch strokes are stored and evaluated inside video clips (every frame vs follow motion).
 - Plugin interface details: manifest schema, versioning, sandboxing limits.
