@@ -162,6 +162,11 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Each placement has three clocks: position in the parent, animation time, and source time.
 - **[Decided]** Keyframes are anchored to a clip's start, end or a percentage of its length, so trimming and retiming behave predictably.
 - **[Decided]** Variable frame rate is kept as a fact about the source: exact per-frame timestamps, and footage is never rewritten to a constant rate.
+- **[Proposed]** (from step 2) **Timeline details:**
+  - Tracks are ordered bottom to top. At any moment the top-most active video clip is shown, with no blending (blending is a LayerStack's job). A gap is transparent black.
+  - A clip's placement (track, start, duration, source in point, speed) lives in the timeline and is saved next to the clip's node. Clips on one track never overlap; edits that would overlap are refused.
+  - A key's time is measured from the clip's start (the default), its end, or a fraction of its length. Outside a clip only start anchors are valid.
+  - Video frames are chosen by source time, and the chosen frame's timestamp is part of the load's cache key. A still clip therefore keys the same for its whole length.
 
 ## 6. Colour
 
@@ -246,6 +251,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 ## 12. Media I/O
 
 - **[Decided]** FFmpeg, as a private, pinned, checksummed LGPL build. The app never uses system FFmpeg. Patent-encumbered components are loaded at runtime. FFmpeg is hidden behind our own media interface and nothing else touches it.
+- **[Decided]** (from step 2) **During development only,** `fw-media` links the system FFmpeg libraries, behind the same interface. The private pinned build becomes its own task, done before anything is distributed.
 - **[Decided]** Images: `image`, `exr` (pure Rust), and `rawler` for RAW, with LibRaw bindings if coverage falls short.
 - **[Decided]** Audio decoding through FFmpeg or `symphonia`, `cpal` for output, `rubato` for resampling. Stream audio; never decode whole files into RAM.
 - **[Decided]** Hardware decode: start with CPU decode plus upload. Zero-copy hardware decode (VA-API or NVDEC into wgpu) later; the old prototype showed it needs wgpu patches.

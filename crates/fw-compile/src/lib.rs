@@ -9,6 +9,7 @@
 //! 5. Fuse chains of per-pixel operations into single GPU passes.
 
 mod codegen;
+mod frames;
 mod lower;
 pub mod plan;
 
@@ -18,7 +19,8 @@ use fw_core::{ColorSpace, ContentHash, NodeId, Time};
 use fw_doc::Document;
 use fw_plugin::{MediaRef, Quality, Registry};
 
-pub use plan::{KernelOp, KernelStep, LoadStep, Origin, Plan, Step};
+pub use frames::FrameTimes;
+pub use plan::{FillStep, KernelOp, KernelStep, LoadStep, Origin, Plan, Step};
 
 /// What the compiler needs to know about a media file. Looked up through a
 /// [`MediaResolver`] so the compiler itself does no I/O.
@@ -32,6 +34,8 @@ pub struct MediaInfo {
     pub space: ColorSpace,
     /// A hash of the file's content, so renamed or moved files keep their cache.
     pub fingerprint: ContentHash,
+    /// Frame timing for video; `None` for a still image.
+    pub frames: Option<FrameTimes>,
 }
 
 pub trait MediaResolver {
@@ -80,6 +84,8 @@ pub enum CompileError {
     },
     #[error("the output has no finite size")]
     InfiniteOutput,
+    #[error("the root container can't be rendered: {0}")]
+    Root(String),
 }
 
 /// Compiles the document's root graph at `options.time`.

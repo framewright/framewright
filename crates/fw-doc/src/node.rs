@@ -9,6 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
 
 use crate::param::Param;
+use crate::timeline::Timeline;
 
 pub use fw_plugin::GRAPH_TYPE;
 
@@ -44,7 +45,20 @@ impl Node {
     }
 
     pub fn graph(&self) -> Option<&Graph> {
-        self.as_known().and_then(|n| n.graph.as_ref())
+        self.as_known()?.graph_contents()
+    }
+
+    pub fn timeline(&self) -> Option<&Timeline> {
+        self.as_known()?.timeline_contents()
+    }
+
+    /// The nodes directly inside this one, if it is a container we understand.
+    pub fn children(&self) -> Vec<NodeId> {
+        match self.as_known().and_then(|n| n.contents.as_ref()) {
+            Some(Contents::Graph(g)) => g.nodes.iter().copied().collect(),
+            Some(Contents::Timeline(t)) => t.clips.keys().copied().collect(),
+            None => vec![],
+        }
     }
 }
 
@@ -55,8 +69,32 @@ pub struct KnownNode {
     pub name: String,
     /// Only parameters that have been set. The rest take the schema default.
     pub params: OrdMap<String, Param>,
-    /// Present when the type is a Graph container.
-    pub graph: Option<Graph>,
+    /// Present when the type is a container.
+    pub contents: Option<Contents>,
+}
+
+/// What a container holds. Each kind stores its children in its own structure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Contents {
+    Graph(Graph),
+    Timeline(Timeline),
+}
+
+impl KnownNode {
+    pub fn graph_contents(&self) -> Option<&Graph> {
+        match self.contents.as_ref()? {
+            Contents::Graph(g) => Some(g),
+            Contents::Timeline(_) => None,
+        }
+    }
+
+    pub fn timeline_contents(&self) -> Option<&Timeline> {
+        match self.contents.as_ref()? {
+            Contents::Timeline(t) => Some(t),
+            Contents::Graph(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

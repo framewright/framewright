@@ -78,6 +78,25 @@ pub fn group_type() -> NodeTypeDesc {
     }
 }
 
+pub fn timeline_type() -> NodeTypeDesc {
+    NodeTypeDesc {
+        container: Some(ContainerKind::Timeline),
+        outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
+        ..desc("fw.timeline", "Timeline")
+    }
+}
+
+pub fn clip_type() -> NodeTypeDesc {
+    NodeTypeDesc {
+        outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
+        params: vec![
+            ParamDesc::media("file", "File"),
+            ParamDesc::float("opacity", "Opacity", Unit::Percent, 100.0),
+        ],
+        ..desc("test.clip", "Clip")
+    }
+}
+
 pub fn registry_with(types: Vec<NodeTypeDesc>) -> Registry {
     let mut r = Registry::new();
     for t in types {
@@ -94,5 +113,7 @@ pub fn full_registry() -> Registry {
         mask_type(),
         sink_type(),
         group_type(),
+        timeline_type(),
+        clip_type(),
     ])
 }

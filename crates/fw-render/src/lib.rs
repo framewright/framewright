@@ -10,7 +10,7 @@ mod gpu;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fw_compile::{Decoder, KernelStep, LoadStep, Plan, Step};
+use fw_compile::{Decoder, FillStep, KernelStep, LoadStep, Plan, Step};
 use fw_core::{ContentHash, RgbaImage};
 use fw_plugin::ImageHandle;
 use half::f16;
@@ -43,6 +43,10 @@ pub struct Stats {
 
 pub struct Renderer {
     gpu: Arc<Gpu>,
+    /// One layout for every kernel, so a shader that never reads its
+    /// parameters still binds the same resources.
+    kernel_layout: wgpu::BindGroupLayout,
+    kernel_pipeline_layout: wgpu::PipelineLayout,
     cache: RamCache,
     pipelines: HashMap<ContentHash, wgpu::ComputePipeline>,
     /// Unused textures by size, reused instead of reallocated.
@@ -55,8 +59,52 @@ pub const DEFAULT_CACHE_BYTES: usize = 2 << 30;
 
 impl Renderer {
     pub fn new(gpu: Arc<Gpu>, cache_bytes: usize) -> Renderer {
+        let device = &gpu.device;
+        let kernel_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fw-kernel"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: FORMAT,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let kernel_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("fw-kernel"),
+                bind_group_layouts: &[Some(&kernel_layout)],
+                immediate_size: 0,
+            });
         Renderer {
             gpu,
+            kernel_layout,
+            kernel_pipeline_layout,
             cache: RamCache::new(cache_bytes),
             pipelines: HashMap::new(),
             pool: HashMap::new(),
@@ -93,6 +141,7 @@ impl Renderer {
         for step in &plan.steps {
             let texture = match step {
                 Step::Load(load) => self.upload(load, decoder)?,
+                Step::Fill(fill) => self.fill(fill),
                 Step::Kernel(kernel) => {
                     let input = &textures[&kernel.input];
                     let output = self.texture(input.width(), input.height());
@@ -138,6 +187,27 @@ impl Renderer {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         })
+    }
+
+    fn fill(&mut self, fill: &FillStep) -> wgpu::Texture {
+        let texture = self.texture(fill.width, fill.height);
+        let pixel: Vec<u8> = fill
+            .rgba
+            .iter()
+            .flat_map(|v| f16::from_f32(*v).to_le_bytes())
+            .collect();
+        let data = pixel.repeat(fill.width as usize * fill.height as usize);
+        self.gpu.queue.write_texture(
+            texture.as_image_copy(),
+            &data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(fill.width * 8),
+                rows_per_image: Some(fill.height),
+            },
+            texture.size(),
+        );
+        texture
     }
 
     fn upload(
@@ -203,7 +273,7 @@ impl Renderer {
             });
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("fw-kernel"),
-                layout: None,
+                layout: Some(&self.kernel_pipeline_layout),
                 module: &module,
                 entry_point: Some("main"),
                 compilation_options: Default::default(),
@@ -226,7 +296,7 @@ impl Renderer {
         let output_view = output.create_view(&Default::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fw-kernel"),
-            layout: &pipeline.get_bind_group_layout(0),
+            layout: &self.kernel_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,

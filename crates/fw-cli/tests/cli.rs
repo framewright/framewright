@@ -97,3 +97,24 @@ fn bad_inputs_fail_cleanly() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("nope.json"));
 }
+
+#[test]
+fn renders_timelines_at_any_time() {
+    let dir = tempfile::tempdir().unwrap();
+    example(dir.path());
+    let timeline = dir.path().join("timeline.json");
+    let timeline = timeline.to_str().unwrap();
+    let plan = fw(&["inspect", timeline, "--time", "1"]);
+    assert!(plan.contains("load"), "{plan}");
+    let gap = fw(&["inspect", timeline, "--time", "2.5"]);
+    assert!(gap.contains("fill"), "{gap}");
+    let out = dir.path().join("t.exr");
+    fw(&[
+        "render",
+        timeline,
+        "--time",
+        "4",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+}

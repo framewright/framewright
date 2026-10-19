@@ -37,6 +37,8 @@ impl MediaResolver for ProjectMedia {
             height: probe.height,
             space: probe.space,
             fingerprint: probe.fingerprint,
+            // TODO: video, in step 2's next check-in.
+            frames: None,
         })
     }
 }

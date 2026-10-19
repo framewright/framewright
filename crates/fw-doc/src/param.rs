@@ -4,6 +4,7 @@
 //! [`ParamValue`]s at the requested time.
 
 use fw_core::{Time, TimeError};
+
 use fw_plugin::{ParamDesc, ParamValue, ValueError};
 use serde::{Deserialize, Serialize};
 
@@ -21,20 +22,69 @@ pub enum Param {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Keyframes {
-    /// Sorted by time, with no two keys at the same time.
+    /// Keys sharing an anchor are in time order, and no two keys share both
+    /// anchor and time. Keys with different anchors may interleave.
     pub keyframes: Vec<Keyframe>,
 }
 
-/// TODO: anchor keys to a clip's start, end or a percentage of its length
-/// once Timeline exists (design §5). Until then times are from the start.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Keyframe {
+    /// Seconds from the anchor point. Negative before it.
     pub t: Time,
     pub v: ParamValue,
     /// How to get from this key to the next.
     #[serde(default, skip_serializing_if = "Interp::is_linear")]
     pub interp: Interp,
+    #[serde(default, skip_serializing_if = "Anchor::is_start")]
+    pub anchor: Anchor,
+}
+
+/// What a key's time is measured from, so trimming and retiming a clip move
+/// keys predictably: an end-anchored fade-out stays at the end.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Anchor {
+    /// The clip's start (or time zero outside any clip).
+    #[default]
+    Start,
+    /// The clip's end.
+    End,
+    /// A fraction of the clip's length, e.g. `1/2` for the middle.
+    Fraction(Time),
+}
+
+impl Anchor {
+    fn is_start(&self) -> bool {
+        *self == Anchor::Start
+    }
+}
+
+/// The moment parameters are resolved at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyTime {
+    /// Time since the start of the enclosing clip, or document time outside clips.
+    pub local: Time,
+    /// The enclosing clip's length, which end and fraction anchors need.
+    pub length: Option<Time>,
+}
+
+impl KeyTime {
+    /// A time outside any clip, where only start anchors make sense.
+    pub fn at(local: Time) -> KeyTime {
+        KeyTime {
+            local,
+            length: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum EvalError {
+    #[error(transparent)]
+    Time(#[from] TimeError),
+    #[error("keys anchored to a clip's end or length only work inside a clip")]
+    NeedsClip,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,28 +103,44 @@ impl Interp {
 }
 
 impl Param {
-    /// The plain value at time `t`.
-    pub fn value_at(&self, t: Time) -> Result<ParamValue, TimeError> {
+    /// The plain value at `at`.
+    pub fn value_at(&self, at: KeyTime) -> Result<ParamValue, EvalError> {
         let keys = match self {
             Param::Constant(v) => return Ok(v.clone()),
             Param::Keyframed(k) => &k.keyframes,
         };
-        let (first, last) = match (keys.first(), keys.last()) {
+        // Where each key lands for this clip length, in time order.
+        let mut placed = Vec::with_capacity(keys.len());
+        for key in keys {
+            let when = match key.anchor {
+                Anchor::Start => key.t,
+                Anchor::End => at.length.ok_or(EvalError::NeedsClip)?.checked_add(key.t)?,
+                Anchor::Fraction(f) => at
+                    .length
+                    .ok_or(EvalError::NeedsClip)?
+                    .checked_mul(f)?
+                    .checked_add(key.t)?,
+            };
+            placed.push((when, key));
+        }
+        placed.sort_by_key(|(when, _)| *when);
+        let t = at.local;
+        let (first, last) = match (placed.first(), placed.last()) {
             (Some(first), Some(last)) => (first, last),
             _ => unreachable!("checked parameters always have at least one key"),
         };
-        if t <= first.t {
-            return Ok(first.v.clone());
+        if t <= first.0 {
+            return Ok(first.1.v.clone());
         }
-        if t >= last.t {
-            return Ok(last.v.clone());
+        if t >= last.0 {
+            return Ok(last.1.v.clone());
         }
-        let next = keys.partition_point(|k| k.t <= t);
-        let (a, b) = (&keys[next - 1], &keys[next]);
+        let next = placed.partition_point(|(when, _)| *when <= t);
+        let ((ta, a), (tb, b)) = (placed[next - 1], placed[next]);
         Ok(match a.interp {
             Interp::Hold => a.v.clone(),
             Interp::Linear => {
-                let w = t.checked_sub(a.t)?.checked_div(b.t.checked_sub(a.t)?)?;
+                let w = t.checked_sub(ta)?.checked_div(tb.checked_sub(ta)?)?;
                 a.v.lerp(&b.v, w.as_f64())
             }
         })
@@ -99,8 +165,12 @@ impl Param {
                 if k.keyframes.is_empty() {
                     return Err(ParamError::NoKeyframes);
                 }
-                if k.keyframes.windows(2).any(|w| w[0].t >= w[1].t) {
-                    return Err(ParamError::KeyframeOrder);
+                for (i, a) in k.keyframes.iter().enumerate() {
+                    let later_same_anchor =
+                        k.keyframes[i + 1..].iter().filter(|b| b.anchor == a.anchor);
+                    if later_same_anchor.into_iter().any(|b| b.t <= a.t) {
+                        return Err(ParamError::KeyframeOrder);
+                    }
                 }
                 let keyframes = k
                     .keyframes
@@ -124,7 +194,7 @@ pub enum ParamError {
     Value(#[from] ValueError),
     #[error("an animated parameter needs at least one keyframe")]
     NoKeyframes,
-    #[error("keyframes must be in time order, with no two at the same time")]
+    #[error("keyframes with the same anchor must be in time order, with no two at the same time")]
     KeyframeOrder,
 }
 
@@ -142,6 +212,7 @@ mod tests {
             t: t(time),
             v: ParamValue::Float(v),
             interp: Interp::Linear,
+            anchor: Anchor::Start,
         }
     }
 
@@ -150,9 +221,18 @@ mod tests {
         let p = Param::Keyframed(Keyframes {
             keyframes: vec![key("1", 0.0), key("3", 2.0)],
         });
-        assert_eq!(p.value_at(t("0")).unwrap(), ParamValue::Float(0.0));
-        assert_eq!(p.value_at(t("2")).unwrap(), ParamValue::Float(1.0));
-        assert_eq!(p.value_at(t("5")).unwrap(), ParamValue::Float(2.0));
+        assert_eq!(
+            p.value_at(KeyTime::at(t("0"))).unwrap(),
+            ParamValue::Float(0.0)
+        );
+        assert_eq!(
+            p.value_at(KeyTime::at(t("2"))).unwrap(),
+            ParamValue::Float(1.0)
+        );
+        assert_eq!(
+            p.value_at(KeyTime::at(t("5"))).unwrap(),
+            ParamValue::Float(2.0)
+        );
         assert!(p.varies_with_time());
     }
 
@@ -163,7 +243,61 @@ mod tests {
         let p = Param::Keyframed(Keyframes {
             keyframes: vec![a, key("1", 5.0)],
         });
-        assert_eq!(p.value_at(t("0.99")).unwrap(), ParamValue::Float(1.0));
+        assert_eq!(
+            p.value_at(KeyTime::at(t("0.99"))).unwrap(),
+            ParamValue::Float(1.0)
+        );
+    }
+
+    #[test]
+    fn anchors_follow_the_clip() {
+        // A fade-out over the last second, whatever the clip's length.
+        let mut fade = key("-1", 1.0);
+        fade.anchor = Anchor::End;
+        let mut out = key("0", 0.0);
+        out.anchor = Anchor::End;
+        let mut mid = key("0", 0.5);
+        mid.anchor = Anchor::Fraction(t("1/2"));
+        let p = Param::Keyframed(Keyframes {
+            keyframes: vec![fade, out],
+        });
+        let clip = |local: &str, length: &str| KeyTime {
+            local: t(local),
+            length: Some(t(length)),
+        };
+        assert_eq!(
+            p.value_at(clip("9.5", "10")).unwrap(),
+            ParamValue::Float(0.5)
+        );
+        assert_eq!(
+            p.value_at(clip("4.5", "5")).unwrap(),
+            ParamValue::Float(0.5)
+        );
+        assert_eq!(p.value_at(KeyTime::at(t("1"))), Err(EvalError::NeedsClip));
+
+        // Keys from different anchors interleave by where they land.
+        let p = Param::Keyframed(Keyframes {
+            keyframes: vec![key("0", 0.0), mid],
+        });
+        assert_eq!(p.value_at(clip("2", "8")).unwrap(), ParamValue::Float(0.25));
+    }
+
+    #[test]
+    fn anchored_keys_serialise_compactly() {
+        let mut k = key("-1", 1.0);
+        k.anchor = Anchor::End;
+        assert_eq!(
+            serde_json::to_string(&k).unwrap(),
+            r#"{"t":"-1","v":1.0,"anchor":"end"}"#
+        );
+        k.anchor = Anchor::Fraction(t("1/2"));
+        assert_eq!(
+            serde_json::to_string(&k).unwrap(),
+            r#"{"t":"-1","v":1.0,"anchor":{"fraction":"1/2"}}"#
+        );
+        let back: Keyframe =
+            serde_json::from_str(r#"{"t":"-1","v":1.0,"anchor":{"fraction":"1/2"}}"#).unwrap();
+        assert_eq!(back, k);
     }
 
     #[test]

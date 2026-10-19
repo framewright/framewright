@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use fw_core::NodeId;
+use fw_core::{NodeId, Time};
 use fw_plugin::{ContainerKind, Registry};
 use imbl::OrdMap;
 use serde::{Deserialize, Serialize};
@@ -32,8 +32,9 @@ use serde_json::{Map, Value};
 
 use crate::command::check_node;
 use crate::document::Document;
-use crate::node::{Edge, Graph, KnownNode, Node, UnknownNode};
+use crate::node::{Contents, Edge, Graph, KnownNode, Node, UnknownNode};
 use crate::param::Param;
+use crate::timeline::{Placement, Timeline, TimelineSettings, Track, TrackId};
 
 pub const FORMAT: &str = "framewright.project";
 pub const FORMAT_VERSION: u32 = 1;
@@ -85,9 +86,12 @@ pub fn from_json(text: &str, registry: &Registry) -> Result<Document, LoadError>
         parents: OrdMap::new(),
     };
     read_node(&mut doc, registry, file.root, &file.nodes[&file.root])?;
-    if doc.graph(doc.root).is_none() {
+    if doc
+        .node(doc.root)
+        .is_none_or(|n| n.graph().is_none() && n.timeline().is_none())
+    {
         return Err(LoadError::Structure(
-            "the root must be a Graph container of a known type".into(),
+            "the root must be a Graph or Timeline container of a known type".into(),
         ));
     }
     doc.check_invariants().map_err(LoadError::Structure)?;
@@ -119,12 +123,31 @@ struct KnownOut<'a> {
     params: BTreeMap<&'a str, &'a Param>,
     #[serde(skip_serializing_if = "Option::is_none")]
     graph: Option<GraphOut<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeline: Option<TimelineOut<'a>>,
 }
 
 #[derive(Serialize)]
 struct GraphOut<'a> {
     nodes: BTreeMap<NodeId, NodeOut<'a>>,
     edges: Vec<Edge>,
+}
+
+#[derive(Serialize)]
+struct TimelineOut<'a> {
+    width: u32,
+    height: u32,
+    rate: Time,
+    sample_rate: u32,
+    tracks: Vec<&'a Track>,
+    clips: BTreeMap<NodeId, ClipOut<'a>>,
+}
+
+#[derive(Serialize)]
+struct ClipOut<'a> {
+    #[serde(flatten)]
+    placement: &'a Placement,
+    node: NodeOut<'a>,
 }
 
 fn node_out(doc: &Document, id: NodeId) -> NodeOut<'_> {
@@ -135,9 +158,27 @@ fn node_out(doc: &Document, id: NodeId) -> NodeOut<'_> {
             version: n.version,
             name: &n.name,
             params: n.params.iter().map(|(k, v)| (k.as_str(), v)).collect(),
-            graph: n.graph.as_ref().map(|g| GraphOut {
+            graph: n.graph_contents().map(|g| GraphOut {
                 nodes: g.nodes.iter().map(|c| (*c, node_out(doc, *c))).collect(),
                 edges: g.edges().collect(),
+            }),
+            timeline: n.timeline_contents().map(|t| TimelineOut {
+                width: t.settings.width,
+                height: t.settings.height,
+                rate: t.settings.rate,
+                sample_rate: t.settings.sample_rate,
+                tracks: t.tracks.iter().collect(),
+                clips: t
+                    .clips
+                    .iter()
+                    .map(|(c, placement)| {
+                        let clip = ClipOut {
+                            placement,
+                            node: node_out(doc, *c),
+                        };
+                        (*c, clip)
+                    })
+                    .collect(),
             }),
         }),
     }
@@ -172,6 +213,36 @@ struct KnownIn {
     #[serde(default)]
     params: Map<String, Value>,
     graph: Option<GraphIn>,
+    timeline: Option<TimelineIn>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TimelineIn {
+    width: u32,
+    height: u32,
+    rate: Time,
+    sample_rate: u32,
+    #[serde(default)]
+    tracks: Vec<Track>,
+    #[serde(default)]
+    clips: BTreeMap<NodeId, ClipIn>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClipIn {
+    track: TrackId,
+    start: Time,
+    duration: Time,
+    source_in: Time,
+    #[serde(default = "one")]
+    speed: Time,
+    node: Box<RawValue>,
+}
+
+fn one() -> Time {
+    Time::from_seconds(1)
 }
 
 #[derive(Deserialize)]
@@ -233,31 +304,60 @@ fn read_node(
             .map_err(|e| err(format!("parameter {name:?}: {e}")))?;
         params.insert(name, param);
     }
-    let is_graph = desc.container == Some(ContainerKind::Graph);
-    if node.graph.is_some() != is_graph {
+    let kind = match (&node.graph, &node.timeline) {
+        (None, None) => None,
+        (Some(_), None) => Some(ContainerKind::Graph),
+        (None, Some(_)) => Some(ContainerKind::Timeline),
+        (Some(_), Some(_)) => {
+            return Err(err("a node can't hold both a graph and a timeline".into()));
+        }
+    };
+    if kind != desc.container {
         return Err(err(format!("contents don't match the type {}", desc.id)));
     }
-    let mut graph = None;
-    if let Some(contents) = node.graph {
+    let mut contents = None;
+    if let Some(graph) = node.graph {
         let mut g = Graph::default();
-        for (child, child_raw) in &contents.nodes {
+        for (child, child_raw) in &graph.nodes {
             read_node(doc, registry, *child, child_raw)?;
             doc.parents.insert(*child, id);
             g.nodes.insert(*child);
         }
-        for edge in contents.edges {
+        for edge in graph.edges {
             if g.inputs.insert(edge.to.clone(), edge.from).is_some() {
                 return Err(err(format!("input {} is connected twice", edge.to)));
             }
         }
-        graph = Some(g);
+        contents = Some(Contents::Graph(g));
+    }
+    if let Some(timeline) = node.timeline {
+        let mut t = Timeline::new(TimelineSettings {
+            width: timeline.width,
+            height: timeline.height,
+            rate: timeline.rate,
+            sample_rate: timeline.sample_rate,
+        });
+        t.tracks = timeline.tracks.into_iter().collect();
+        for (child, clip) in timeline.clips {
+            read_node(doc, registry, child, &clip.node)?;
+            doc.parents.insert(child, id);
+            let placement = Placement {
+                track: clip.track,
+                start: clip.start,
+                duration: clip.duration,
+                source_in: clip.source_in,
+                speed: clip.speed,
+            };
+            t.clips.insert(child, placement);
+        }
+        contents = Some(Contents::Timeline(t));
     }
     let node = Node::Known(KnownNode {
         type_id: desc.id.clone(),
         version: desc.version,
         name: node.name,
         params,
-        graph,
+        contents,
     });
     check_node(id, &node, registry).map_err(|e| err(e.to_string()))?;
     doc.nodes.insert(id, node);

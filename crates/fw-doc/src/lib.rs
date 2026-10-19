@@ -11,9 +11,11 @@ pub mod history;
 pub mod node;
 pub mod param;
 pub mod save;
+pub mod timeline;
 
 pub use command::{Command, CommandError};
 pub use document::Document;
 pub use history::{Cause, Editor, Event};
-pub use node::{Edge, GRAPH_TYPE, Graph, KnownNode, Node, PortRef, UnknownNode};
-pub use param::{Interp, Keyframe, Keyframes, Param, ParamError};
+pub use node::{Contents, Edge, GRAPH_TYPE, Graph, KnownNode, Node, PortRef, UnknownNode};
+pub use param::{Anchor, EvalError, Interp, KeyTime, Keyframe, Keyframes, Param, ParamError};
+pub use timeline::{ClipTime, Placement, Timeline, TimelineSettings, Track, TrackId, TrackKind};

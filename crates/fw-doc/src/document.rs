@@ -6,7 +6,9 @@
 use fw_core::NodeId;
 use imbl::{OrdMap, OrdSet};
 
-use crate::node::{GRAPH_TYPE, Graph, KnownNode, Node, PortRef};
+use crate::node::{Contents, GRAPH_TYPE, Graph, KnownNode, Node, PortRef};
+use crate::timeline::{Timeline, TimelineSettings};
+use fw_plugin::TIMELINE_TYPE;
 
 /// TODO: a project holds several documents (photo, video, audio; design §3.1).
 /// For now there is one root container.
@@ -19,14 +21,29 @@ pub struct Document {
 }
 
 impl Document {
-    /// An empty document whose root is a Graph container.
+    /// An empty document whose root is a Graph container (a photo or compositing document).
     pub fn new(root: NodeId) -> Document {
+        Document::with_root(root, GRAPH_TYPE, "Main", Contents::Graph(Graph::default()))
+    }
+
+    /// An empty document whose root is a Timeline (a video document).
+    pub fn new_timeline(root: NodeId, settings: TimelineSettings) -> Document {
+        let timeline = Timeline::new(settings);
+        Document::with_root(
+            root,
+            TIMELINE_TYPE,
+            "Main Timeline",
+            Contents::Timeline(timeline),
+        )
+    }
+
+    fn with_root(root: NodeId, type_id: &str, name: &str, contents: Contents) -> Document {
         let node = Node::Known(KnownNode {
-            type_id: GRAPH_TYPE.into(),
+            type_id: type_id.into(),
             version: 1,
-            name: "Main".into(),
+            name: name.into(),
             params: OrdMap::new(),
-            graph: Some(Graph::default()),
+            contents: Some(contents),
         });
         Document {
             root,
@@ -70,6 +87,11 @@ impl Document {
         self.node(container)?.graph()
     }
 
+    /// The contents of `container`, if it is a Timeline.
+    pub fn timeline(&self, container: NodeId) -> Option<&Timeline> {
+        self.node(container)?.timeline()
+    }
+
     /// The output feeding `input`, if it is connected.
     pub fn source_of(&self, input: &PortRef) -> Option<&PortRef> {
         self.graph(self.parent(input.node)?)?.inputs.get(input)
@@ -81,8 +103,8 @@ impl Document {
         let mut stack = vec![id];
         while let Some(id) = stack.pop() {
             out.push(id);
-            if let Some(g) = self.graph(id) {
-                stack.extend(g.nodes.iter().rev().copied());
+            if let Some(node) = self.node(id) {
+                stack.extend(node.children().into_iter().rev());
             }
         }
         out
@@ -98,12 +120,28 @@ impl Document {
             let Some(node) = self.node(id) else {
                 return Err(format!("{id} is listed in a container but missing"));
             };
-            if let Some(g) = node.graph() {
-                for child in &g.nodes {
-                    if self.parent(*child) != Some(id) {
-                        return Err(format!("{child} has the wrong parent"));
+            for child in node.children() {
+                if self.parent(child) != Some(id) {
+                    return Err(format!("{child} has the wrong parent"));
+                }
+            }
+            if let Some(t) = node.timeline() {
+                let placements: Vec<_> = t.clips.iter().collect();
+                for (i, (clip, p)) in placements.iter().enumerate() {
+                    let track = t
+                        .track(p.track)
+                        .ok_or_else(|| format!("{clip} is on a missing track"))?;
+                    if let Some((other, _)) =
+                        placements[i + 1..].iter().find(|(_, q)| p.overlaps(q))
+                    {
+                        return Err(format!("{clip} and {other} overlap on {}", track.name));
+                    }
+                    if p.duration <= fw_core::Time::ZERO || p.speed <= fw_core::Time::ZERO {
+                        return Err(format!("{clip} has a non-positive duration or speed"));
                     }
                 }
+            }
+            if let Some(g) = node.graph() {
                 for edge in g.edges() {
                     for end in [&edge.from, &edge.to] {
                         if !g.nodes.contains(&end.node) {

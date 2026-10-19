@@ -47,9 +47,13 @@ impl Plan {
         for step in &self.steps {
             match step {
                 Step::Load(load) => {
+                    let frame = load
+                        .frame
+                        .map(|f| format!(" frame at {f}s"))
+                        .unwrap_or_default();
                     let _ = writeln!(
                         out,
-                        "  %{} = load {} as {} ({}×{}, content {})  key {}",
+                        "  %{} = load {}{frame} as {} ({}×{}, content {})  key {}",
                         load.output.0,
                         load.path.display(),
                         load.space,
@@ -57,6 +61,18 @@ impl Plan {
                         load.height,
                         load.fingerprint.short(),
                         load.key.short()
+                    );
+                }
+                Step::Fill(fill) => {
+                    let _ = writeln!(
+                        out,
+                        "  %{} = fill {:?} as {} ({}×{})  key {}",
+                        fill.output.0,
+                        fill.rgba,
+                        fill.space,
+                        fill.width,
+                        fill.height,
+                        fill.key.short()
                     );
                 }
                 Step::Kernel(kernel) => {
@@ -90,6 +106,7 @@ impl Plan {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
     Load(LoadStep),
+    Fill(FillStep),
     Kernel(KernelStep),
 }
 
@@ -97,6 +114,7 @@ impl Step {
     pub fn output(&self) -> ImageHandle {
         match self {
             Step::Load(s) => s.output,
+            Step::Fill(s) => s.output,
             Step::Kernel(s) => s.output,
         }
     }
@@ -104,6 +122,7 @@ impl Step {
     pub fn key(&self) -> ContentHash {
         match self {
             Step::Load(s) => s.key,
+            Step::Fill(s) => s.key,
             Step::Kernel(s) => s.key,
         }
     }
@@ -121,6 +140,20 @@ pub struct LoadStep {
     pub width: u32,
     pub height: u32,
     pub region: Rect,
+    /// For video, the start time of the frame to decode; `None` for a still.
+    pub frame: Option<fw_core::Time>,
+}
+
+/// An image of one colour, e.g. the transparent black of a timeline gap.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FillStep {
+    pub output: ImageHandle,
+    pub key: ContentHash,
+    /// Premultiplied, in `space`.
+    pub rgba: [f32; 4],
+    pub space: ColorSpace,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// One GPU pass running one or more fused per-pixel operations.

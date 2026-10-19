@@ -1,0 +1,71 @@
+{
+  "format": "framewright.project",
+  "format_version": 1,
+  "root": "0000000000003G000000000001",
+  "nodes": {
+    "0000000000003G000000000001": {
+      "type": "fw.timeline",
+      "version": 1,
+      "name": "Main Timeline",
+      "timeline": {
+        "width": 64,
+        "height": 32,
+        "rate": "24000/1001",
+        "sample_rate": 48000,
+        "tracks": [
+          {
+            "id": "0000000000003G000000000002",
+            "kind": "video",
+            "name": "V1"
+          },
+          {
+            "id": "0000000000003G000000000003",
+            "kind": "video",
+            "name": "V2"
+          }
+        ],
+        "clips": {
+          "0000000000003G000000000004": {
+            "track": "0000000000003G000000000002",
+            "start": "0",
+            "duration": "4",
+            "source_in": "0",
+            "node": {
+              "type": "test.clip",
+              "version": 1,
+              "name": "Clip",
+              "params": {
+                "opacity": {
+                  "keyframes": [
+                    {
+                      "t": "-1",
+                      "v": 100.0,
+                      "anchor": "end"
+                    },
+                    {
+                      "t": "0",
+                      "v": 0.0,
+                      "anchor": "end"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "0000000000003G000000000005": {
+            "track": "0000000000003G000000000003",
+            "start": "2",
+            "duration": "1",
+            "source_in": "10",
+            "speed": "1/2",
+            "node": {
+              "type": "test.clip",
+              "version": 1,
+              "name": "Clip"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -6,7 +6,9 @@ use std::sync::Arc;
 use fw_compile::{CompileError, MediaInfo, MediaResolver, Options, Origin, Plan, Step, compile};
 use fw_core::id::{IdGen, SequentialIds};
 use fw_core::{ColorSpace, ContentHash, NodeId, Time};
-use fw_doc::{Command, Document, Edge, Editor, Interp, Keyframe, Keyframes, Param, PortRef};
+use fw_doc::{
+    Anchor, Command, Document, Edge, Editor, Interp, Keyframe, Keyframes, Param, PortRef,
+};
 use fw_plugin::{MediaRef, ParamValue, Registry};
 
 /// Pretends every file is a 64×32 image whose content is its path.
@@ -25,6 +27,7 @@ impl MediaResolver for FakeMedia {
             height: 32,
             space: self.space,
             fingerprint: ContentHash::of_bytes(media.path.as_bytes()),
+            frames: None,
         })
     }
 }
@@ -65,6 +68,7 @@ fn sample() -> Sample {
         id,
         type_id: type_id.into(),
         name: None,
+        placement: None,
     };
     let connect = |from, to| Command::Connect {
         edge: Edge {
@@ -218,6 +222,7 @@ fn keys_follow_exactly_what_changes_the_output() {
         t: t.parse().unwrap(),
         v: ParamValue::Float(v),
         interp: Interp::Linear,
+        anchor: Anchor::Start,
     };
     let flat = Param::Keyframed(Keyframes {
         keyframes: vec![key("0", 1.0), key("2", 1.0)],
@@ -270,6 +275,7 @@ fn compiled_ids_and_keys_ignore_unrelated_edits() {
                 id: stray,
                 type_id: "fw.exposure".into(),
                 name: None,
+                placement: None,
             }],
         )
         .unwrap();
@@ -398,6 +404,7 @@ fn unknown_nodes_fail_with_their_name() {
                     id: blur_id,
                     type_id: "future.blur".into(),
                     name: None,
+                    placement: None,
                 },
                 reconnect(s.exposure, blur_id),
                 reconnect(blur_id, s.output),

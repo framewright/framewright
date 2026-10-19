@@ -7,6 +7,12 @@ use crate::value::{ParamValue, ValueError};
 /// The type id of the Graph container. The document's root is one.
 pub const GRAPH_TYPE: &str = "fw.graph";
 
+/// The type id of the Timeline container. A video document's root is one.
+pub const TIMELINE_TYPE: &str = "fw.timeline";
+
+/// The type id of the plain clip: media placed on a timeline, with no graph.
+pub const CLIP_TYPE: &str = "fw.clip";
+
 /// The type id of the Output node, which marks what a Graph container delivers.
 pub const OUTPUT_TYPE: &str = "fw.output";
 
@@ -56,7 +62,8 @@ impl NodeTypeDesc {
 #[serde(rename_all = "snake_case")]
 pub enum ContainerKind {
     Graph,
-    // TODO: Timeline, LayerStack, Scene3D, Mixer.
+    Timeline,
+    // TODO: LayerStack, Scene3D, Mixer.
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]

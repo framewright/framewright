@@ -76,6 +76,7 @@ fn scene() -> Scene {
         id,
         type_id: type_id.into(),
         name: None,
+        placement: None,
     };
     let connect = |from, to| Command::Connect {
         edge: Edge {
@@ -262,4 +263,78 @@ fn output_matches_golden_image() {
     want.premultiply();
     assert_eq!(space, ColorSpace::LINEAR_REC709);
     assert_close(&got, &want, "golden");
+}
+
+#[test]
+fn timelines_render_clips_and_transparent_gaps() {
+    use fw_doc::{Placement, TimelineSettings, Track, TrackId, TrackKind};
+    let s = scene();
+    let mut ids = SequentialIds::new(50);
+    let root = ids.next_id();
+    let (v1, clip) = (TrackId(ids.next_id()), ids.next_id());
+    let settings = TimelineSettings {
+        width: W,
+        height: H,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    editor
+        .apply(
+            "Build",
+            vec![
+                Command::AddTrack {
+                    timeline: root,
+                    track: Track {
+                        id: v1,
+                        kind: TrackKind::Video,
+                        name: "V1".into(),
+                    },
+                    index: 0,
+                },
+                Command::AddNode {
+                    parent: root,
+                    id: clip,
+                    type_id: "fw.clip".into(),
+                    name: None,
+                    placement: Some(Placement {
+                        track: v1,
+                        start: Time::ZERO,
+                        duration: Time::from_seconds(1),
+                        source_in: Time::ZERO,
+                        speed: Time::from_seconds(1),
+                    }),
+                },
+                set(
+                    clip,
+                    "file",
+                    ParamValue::Media(MediaRef {
+                        path: "gradient.png".into(),
+                    }),
+                ),
+            ],
+        )
+        .unwrap();
+    let mut renderer = Renderer::new(gpu(), DEFAULT_CACHE_BYTES);
+    let mut at = |t: &str| {
+        let plan = compile(
+            editor.doc(),
+            editor.registry(),
+            &s.media,
+            &Options::at(t.parse().unwrap()),
+        )
+        .unwrap();
+        renderer.render(&plan, &s.media).unwrap()
+    };
+    let shown = at("1/2");
+    let want = reference(&s.source, ColorSpace::SRGB, 0.0, ColorSpace::LINEAR_REC709);
+    assert_close(&shown, &want, "clip");
+    let gap = at("2");
+    assert!(
+        gap.pixels.iter().all(|v| *v == 0.0),
+        "a gap is transparent black"
+    );
 }

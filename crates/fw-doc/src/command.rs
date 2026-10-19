@@ -10,8 +10,9 @@ use imbl::OrdMap;
 use serde::{Deserialize, Serialize};
 
 use crate::document::Document;
-use crate::node::{Edge, Graph, KnownNode, Node, PortRef};
+use crate::node::{Contents, Edge, Graph, KnownNode, Node, PortRef};
 use crate::param::{Param, ParamError};
+use crate::timeline::{Placement, Timeline, TimelineSettings, Track, TrackId};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +25,9 @@ pub enum Command {
         /// Defaults to the type's name.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        /// Required when the parent is a Timeline, and only then.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<Placement>,
     },
     /// Removes a node, everything nested inside it, and its connections.
     RemoveNode {
@@ -35,6 +39,8 @@ pub enum Command {
         parent: NodeId,
         nodes: Vec<(NodeId, Node)>,
         edges: Vec<Edge>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<Placement>,
     },
     /// Sets a parameter, or resets it to the default with `None`.
     SetParam {
@@ -52,6 +58,22 @@ pub enum Command {
     Rename {
         node: NodeId,
         name: String,
+    },
+    /// Moves, trims or retimes a clip on its timeline.
+    SetPlacement {
+        node: NodeId,
+        placement: Placement,
+    },
+    /// Inserts a track at `index` (0 is the bottom).
+    AddTrack {
+        timeline: NodeId,
+        track: Track,
+        index: usize,
+    },
+    /// Removes an empty track.
+    RemoveTrack {
+        timeline: NodeId,
+        track: TrackId,
     },
 }
 
@@ -87,6 +109,15 @@ pub enum CommandError {
     NotConnected(PortRef),
     #[error("invalid restore: {0}")]
     InvalidRestore(String),
+    #[error("{container} is not a {expected}")]
+    WrongContainer {
+        container: NodeId,
+        expected: &'static str,
+    },
+    #[error("clip placement: {0}")]
+    Placement(String),
+    #[error("track: {0}")]
+    Track(String),
 }
 
 impl Command {
@@ -109,6 +140,10 @@ impl Command {
             Command::SetParam { node, .. } | Command::Rename { node, .. } => vec![*node],
             Command::Connect { edge } => vec![edge.from.node, edge.to.node],
             Command::Disconnect { input } => vec![input.node],
+            Command::SetPlacement { node, .. } => vec![*node],
+            Command::AddTrack { timeline, .. } | Command::RemoveTrack { timeline, .. } => {
+                vec![*timeline]
+            }
         }
     }
 
@@ -119,8 +154,8 @@ impl Command {
                 id,
                 type_id,
                 name,
+                placement,
             } => {
-                graph(doc, *parent)?;
                 if doc.contains(*id) {
                     return Err(CommandError::DuplicateId(*id));
                 }
@@ -132,11 +167,10 @@ impl Command {
                     version: desc.version,
                     name: name.clone().unwrap_or_else(|| desc.name.clone()),
                     params: OrdMap::new(),
-                    graph: (desc.container == Some(ContainerKind::Graph)).then(Graph::default),
+                    contents: desc.container.map(empty_contents),
                 });
+                place(doc, *parent, *id, placement.clone(), &[])?;
                 doc.nodes.insert(*id, node);
-                doc.parents.insert(*id, *parent);
-                graph_mut(doc, *parent)?.nodes.insert(*id);
                 Ok(Command::RemoveNode { id: *id })
             }
 
@@ -150,15 +184,7 @@ impl Command {
                     .into_iter()
                     .map(|n| (n, doc.nodes[&n].clone()))
                     .collect();
-                let g = graph_mut(doc, parent)?;
-                let edges: Vec<Edge> = g
-                    .edges()
-                    .filter(|e| e.from.node == *id || e.to.node == *id)
-                    .collect();
-                for edge in &edges {
-                    g.inputs.remove(&edge.to);
-                }
-                g.nodes.remove(id);
+                let (edges, placement) = unplace(doc, parent, *id)?;
                 for (n, _) in &nodes {
                     doc.nodes.remove(n);
                     doc.parents.remove(n);
@@ -167,6 +193,7 @@ impl Command {
                     parent,
                     nodes,
                     edges,
+                    placement,
                 })
             }
 
@@ -174,8 +201,8 @@ impl Command {
                 parent,
                 nodes,
                 edges,
+                placement,
             } => {
-                graph(doc, *parent)?;
                 let top = nodes
                     .first()
                     .map(|(id, _)| *id)
@@ -187,12 +214,12 @@ impl Command {
                     check_node(*id, node, registry)?;
                     doc.nodes.insert(*id, node.clone());
                 }
-                doc.parents.insert(top, *parent);
                 for (id, node) in nodes {
-                    for child in node.graph().iter().flat_map(|g| g.nodes.iter()) {
-                        doc.parents.insert(*child, *id);
+                    for child in node.children() {
+                        doc.parents.insert(child, *id);
                     }
                 }
+                place(doc, *parent, top, placement.clone(), edges)?;
                 let mut listed: Vec<NodeId> = nodes.iter().map(|(id, _)| *id).collect();
                 let mut reached = doc.subtree(top);
                 listed.sort();
@@ -201,22 +228,6 @@ impl Command {
                     return Err(CommandError::InvalidRestore(
                         "nodes don't form exactly one subtree".into(),
                     ));
-                }
-                let g = graph_mut(doc, *parent)?;
-                g.nodes.insert(top);
-                for edge in edges {
-                    if !g.nodes.contains(&edge.from.node) || !g.nodes.contains(&edge.to.node) {
-                        return Err(CommandError::InvalidRestore(format!(
-                            "edge {} → {} leaves the container",
-                            edge.from, edge.to
-                        )));
-                    }
-                    if g.inputs
-                        .insert(edge.to.clone(), edge.from.clone())
-                        .is_some()
-                    {
-                        return Err(CommandError::AlreadyConnected(edge.to.clone()));
-                    }
                 }
                 Ok(Command::RemoveNode { id: top })
             }
@@ -304,19 +315,192 @@ impl Command {
                     name: old,
                 })
             }
+
+            Command::SetPlacement { node, placement } => {
+                let parent = doc.parent(*node).ok_or(CommandError::Root)?;
+                let t = timeline_mut(doc, parent)?;
+                t.check_placement(placement, Some(*node))
+                    .map_err(CommandError::Placement)?;
+                let old = t
+                    .clips
+                    .insert(*node, placement.clone())
+                    .expect("timeline children always have placements");
+                Ok(Command::SetPlacement {
+                    node: *node,
+                    placement: old,
+                })
+            }
+
+            Command::AddTrack {
+                timeline,
+                track,
+                index,
+            } => {
+                let t = timeline_mut(doc, *timeline)?;
+                if t.track(track.id).is_some() {
+                    return Err(CommandError::Track(format!("{} already exists", track.id)));
+                }
+                if *index > t.tracks.len() {
+                    return Err(CommandError::Track(format!(
+                        "index {index} is past the {} tracks",
+                        t.tracks.len()
+                    )));
+                }
+                t.tracks.insert(*index, track.clone());
+                Ok(Command::RemoveTrack {
+                    timeline: *timeline,
+                    track: track.id,
+                })
+            }
+
+            Command::RemoveTrack { timeline, track } => {
+                let t = timeline_mut(doc, *timeline)?;
+                let index = t
+                    .tracks
+                    .iter()
+                    .position(|tr| tr.id == *track)
+                    .ok_or_else(|| CommandError::Track(format!("there is no track {track}")))?;
+                if t.clips.values().any(|p| p.track == *track) {
+                    return Err(CommandError::Track(format!(
+                        "{} still has clips on it",
+                        t.tracks[index].name
+                    )));
+                }
+                let removed = t.tracks.remove(index);
+                Ok(Command::AddTrack {
+                    timeline: *timeline,
+                    track: removed,
+                    index,
+                })
+            }
         }
     }
 }
 
-fn graph(doc: &Document, id: NodeId) -> Result<&Graph, CommandError> {
-    let node = doc.node(id).ok_or(CommandError::NoSuchNode(id))?;
-    node.graph().ok_or(CommandError::NotAContainer(id))
+fn empty_contents(kind: ContainerKind) -> Contents {
+    match kind {
+        ContainerKind::Graph => Contents::Graph(Graph::default()),
+        // TODO: nested timelines should take their settings from where they're used.
+        ContainerKind::Timeline => Contents::Timeline(Timeline::new(TimelineSettings {
+            width: 1920,
+            height: 1080,
+            rate: fw_core::Time::from_seconds(24),
+            sample_rate: 48000,
+        })),
+    }
+}
+
+/// Puts `id` into `parent`'s structure: as a graph member with `edges`, or as
+/// a clip with `placement`.
+fn place(
+    doc: &mut Document,
+    parent: NodeId,
+    id: NodeId,
+    placement: Option<Placement>,
+    edges: &[Edge],
+) -> Result<(), CommandError> {
+    match doc.nodes.get_mut(&parent) {
+        Some(Node::Known(KnownNode {
+            contents: Some(Contents::Graph(g)),
+            ..
+        })) => {
+            if placement.is_some() {
+                return Err(CommandError::Placement(
+                    "nodes in a graph have no placement".into(),
+                ));
+            }
+            g.nodes.insert(id);
+            for edge in edges {
+                if !g.nodes.contains(&edge.from.node) || !g.nodes.contains(&edge.to.node) {
+                    return Err(CommandError::InvalidRestore(format!(
+                        "edge {} → {} leaves the container",
+                        edge.from, edge.to
+                    )));
+                }
+                if g.inputs
+                    .insert(edge.to.clone(), edge.from.clone())
+                    .is_some()
+                {
+                    return Err(CommandError::AlreadyConnected(edge.to.clone()));
+                }
+            }
+        }
+        Some(Node::Known(KnownNode {
+            contents: Some(Contents::Timeline(t)),
+            ..
+        })) => {
+            let placement = placement.ok_or_else(|| {
+                CommandError::Placement("a clip on a timeline needs a placement".into())
+            })?;
+            if !edges.is_empty() {
+                return Err(CommandError::InvalidRestore(
+                    "timeline clips have no connections".into(),
+                ));
+            }
+            t.check_placement(&placement, None)
+                .map_err(CommandError::Placement)?;
+            t.clips.insert(id, placement);
+        }
+        Some(_) => return Err(CommandError::NotAContainer(parent)),
+        None => return Err(CommandError::NoSuchNode(parent)),
+    }
+    doc.parents.insert(id, parent);
+    Ok(())
+}
+
+/// Takes `id` out of `parent`'s structure, returning what restoring it needs.
+fn unplace(
+    doc: &mut Document,
+    parent: NodeId,
+    id: NodeId,
+) -> Result<(Vec<Edge>, Option<Placement>), CommandError> {
+    match doc.nodes.get_mut(&parent) {
+        Some(Node::Known(KnownNode {
+            contents: Some(Contents::Graph(g)),
+            ..
+        })) => {
+            let edges: Vec<Edge> = g
+                .edges()
+                .filter(|e| e.from.node == id || e.to.node == id)
+                .collect();
+            for edge in &edges {
+                g.inputs.remove(&edge.to);
+            }
+            g.nodes.remove(&id);
+            Ok((edges, None))
+        }
+        Some(Node::Known(KnownNode {
+            contents: Some(Contents::Timeline(t)),
+            ..
+        })) => Ok((vec![], t.clips.remove(&id))),
+        _ => Err(CommandError::NotAContainer(parent)),
+    }
 }
 
 fn graph_mut(doc: &mut Document, id: NodeId) -> Result<&mut Graph, CommandError> {
     match doc.nodes.get_mut(&id) {
-        Some(Node::Known(KnownNode { graph: Some(g), .. })) => Ok(g),
-        Some(_) => Err(CommandError::NotAContainer(id)),
+        Some(Node::Known(KnownNode {
+            contents: Some(Contents::Graph(g)),
+            ..
+        })) => Ok(g),
+        Some(_) => Err(CommandError::WrongContainer {
+            container: id,
+            expected: "graph",
+        }),
+        None => Err(CommandError::NoSuchNode(id)),
+    }
+}
+
+fn timeline_mut(doc: &mut Document, id: NodeId) -> Result<&mut Timeline, CommandError> {
+    match doc.nodes.get_mut(&id) {
+        Some(Node::Known(KnownNode {
+            contents: Some(Contents::Timeline(t)),
+            ..
+        })) => Ok(t),
+        Some(_) => Err(CommandError::WrongContainer {
+            container: id,
+            expected: "timeline",
+        }),
         None => Err(CommandError::NoSuchNode(id)),
     }
 }
@@ -400,7 +584,11 @@ pub(crate) fn check_node(id: NodeId, node: &Node, registry: &Registry) -> Result
             known.version, known.type_id, desc.version
         )));
     }
-    if known.graph.is_some() != (desc.container == Some(ContainerKind::Graph)) {
+    let kind = known.contents.as_ref().map(|c| match c {
+        Contents::Graph(_) => ContainerKind::Graph,
+        Contents::Timeline(_) => ContainerKind::Timeline,
+    });
+    if kind != desc.container {
         return Err(CommandError::InvalidRestore(format!(
             "{id} has the wrong contents for its type"
         )));

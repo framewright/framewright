@@ -10,8 +10,8 @@ pub mod registry;
 pub mod value;
 
 pub use desc::{
-    ChoiceOption, ContainerKind, GRAPH_TYPE, HandleKind, NodeTypeDesc, OUTPUT_TYPE, ParamDesc,
-    ParamKind, PortDesc, PortType, Unit,
+    CLIP_TYPE, ChoiceOption, ContainerKind, GRAPH_TYPE, HandleKind, NodeTypeDesc, OUTPUT_TYPE,
+    ParamDesc, ParamKind, PortDesc, PortType, TIMELINE_TYPE, Unit,
 };
 pub use image::{
     ImageBehaviour, ImageHandle, ImageInfo, NodeError, PixelOp, PlanBuilder, Quality, Request,

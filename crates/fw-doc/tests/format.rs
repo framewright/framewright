@@ -32,6 +32,7 @@ fn add(parent: NodeId, id: NodeId, type_id: &str) -> Command {
         id,
         type_id: type_id.into(),
         name: None,
+        placement: None,
     }
 }
 
@@ -47,11 +48,13 @@ fn sample(registry: Registry) -> Editor {
                 t: Time::ZERO,
                 v: ParamValue::Float(0.0),
                 interp: Interp::Linear,
+                anchor: Anchor::Start,
             },
             Keyframe {
                 t: "3/2".parse().unwrap(),
                 v: ParamValue::Float(1.5),
                 interp: Interp::Hold,
+                anchor: Anchor::Start,
             },
         ],
     });

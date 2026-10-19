@@ -9,7 +9,10 @@ use clap::{Parser, Subcommand};
 use fw_compile::{Options, Plan, Step};
 use fw_core::id::{IdGen, RandomIds};
 use fw_core::{RgbaImage, Time, Transfer};
-use fw_doc::{Command, Document, Edge, Editor, Param, PortRef};
+use fw_doc::{
+    Command, Document, Edge, Editor, Param, Placement, PortRef, TimelineSettings, Track, TrackId,
+    TrackKind,
+};
 use fw_media::{Format, ProjectMedia};
 use fw_plugin::{MediaRef, ParamValue};
 use fw_render::{DEFAULT_CACHE_BYTES, Gpu, Renderer};
@@ -180,6 +183,7 @@ fn example(folder: &Path) -> Result<(), String> {
         id,
         type_id: type_id.into(),
         name: None,
+        placement: None,
     };
     let connect = |from, to| Command::Connect {
         edge: Edge {
@@ -215,9 +219,76 @@ fn example(folder: &Path) -> Result<(), String> {
     let project = folder.join("project.json");
     fw_doc::save::save(editor.doc(), &project)
         .map_err(|e| format!("{}: {e}", project.display()))?;
-    println!("wrote {} and {}", project.display(), image_path.display());
+
+    let timeline = folder.join("timeline.json");
+    fw_doc::save::save(&example_timeline(&mut ids)?, &timeline)
+        .map_err(|e| format!("{}: {e}", timeline.display()))?;
+    println!(
+        "wrote {}, {} and {}",
+        project.display(),
+        timeline.display(),
+        image_path.display()
+    );
     println!("try: fw render {} --out frame.exr", project.display());
+    println!(
+        "     fw render {} --time 2.5 --out gap.png   (the gradient plays 0–2 s and 3–5 s)",
+        timeline.display()
+    );
     Ok(())
+}
+
+/// A 1080p, 24 fps timeline: the gradient on V1 from 0 to 2 s and on V2 from
+/// 3 to 5 s, with a gap between.
+fn example_timeline(ids: &mut RandomIds) -> Result<Document, String> {
+    let root = ids.next_id();
+    let settings = TimelineSettings {
+        width: 1920,
+        height: 1080,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    let mut commands = vec![];
+    for (index, (name, start)) in [("V1", 0), ("V2", 3)].into_iter().enumerate() {
+        let track = TrackId(ids.next_id());
+        let clip = ids.next_id();
+        commands.push(Command::AddTrack {
+            timeline: root,
+            track: Track {
+                id: track,
+                kind: TrackKind::Video,
+                name: name.into(),
+            },
+            index,
+        });
+        commands.push(Command::AddNode {
+            parent: root,
+            id: clip,
+            type_id: "fw.clip".into(),
+            name: Some("Gradient".into()),
+            placement: Some(Placement {
+                track,
+                start: Time::from_seconds(start),
+                duration: Time::from_seconds(2),
+                source_in: Time::ZERO,
+                speed: Time::from_seconds(1),
+            }),
+        });
+        commands.push(Command::SetParam {
+            node: clip,
+            param: "file".into(),
+            value: Some(Param::Constant(ParamValue::Media(MediaRef {
+                path: "gradient.png".into(),
+            }))),
+        });
+    }
+    editor
+        .apply("Example timeline", commands)
+        .map_err(|e| e.to_string())?;
+    Ok(editor.doc().clone())
 }
 
 /// A smooth hue sweep fading to grey, with an alpha ramp at the bottom. Written

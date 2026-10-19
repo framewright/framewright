@@ -8,6 +8,7 @@ mod exposure;
 mod graph;
 mod output;
 mod read_image;
+mod timeline;
 
 use fw_plugin::{Registry, RegistryError};
 
@@ -19,6 +20,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegistryError> {
     registry.register(read_image::node_type())?;
     registry.register(exposure::node_type())?;
     registry.register(output::node_type())?;
+    registry.register(timeline::timeline_type())?;
+    registry.register(timeline::clip_type())?;
     Ok(())
 }
 
@@ -34,7 +37,14 @@ mod tests {
     #[test]
     fn built_ins_register() {
         let registry = super::builtin_registry();
-        for id in ["fw.graph", "fw.read_image", "fw.exposure", "fw.output"] {
+        for id in [
+            "fw.graph",
+            "fw.read_image",
+            "fw.exposure",
+            "fw.output",
+            "fw.timeline",
+            "fw.clip",
+        ] {
             assert!(registry.get(id).is_some(), "{id} is missing");
         }
     }

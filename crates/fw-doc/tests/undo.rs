@@ -135,6 +135,7 @@ fn commands(op: &Op, doc: &Document, ids: &mut SequentialIds) -> Vec<Command> {
             id: ids.next_id(),
             type_id: TYPES[*ty].into(),
             name: None,
+            placement: None,
         }],
         Op::Remove { node } => vec![Command::RemoveNode {
             id: pick(doc, *node),
@@ -152,11 +153,13 @@ fn commands(op: &Op, doc: &Document, ids: &mut SequentialIds) -> Vec<Command> {
                             t: Time::ZERO,
                             v: ParamValue::Float(0.0),
                             interp: Interp::Linear,
+                            anchor: Anchor::Start,
                         },
                         Keyframe {
                             t: Time::from_seconds(2),
                             v,
                             interp: Interp::Hold,
+                            anchor: Anchor::Start,
                         },
                     ],
                 })
@@ -294,6 +297,7 @@ fn inverse_of_remove_restores_nested_contents_and_connections() {
         id,
         type_id: ty.into(),
         name: None,
+        placement: None,
     };
     let connect = |a, b| Command::Connect {
         edge: Edge {
@@ -340,6 +344,7 @@ fn connections_are_checked() {
             id,
             type_id: ty.into(),
             name: None,
+            placement: None,
         }
         .apply(&mut doc, &registry)
         .unwrap();
