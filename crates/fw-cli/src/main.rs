@@ -56,7 +56,8 @@ enum Cmd {
     },
     /// Play a project: sound through the default audio device, which sets the
     /// pace, and pictures rendered ahead and chosen by it. Reports frames
-    /// shown and dropped, audio underruns and the A/V offset every second.
+    /// shown and dropped, audio underruns and how late frames appear, every
+    /// second. Pictures aren't shown on screen yet.
     Play {
         project: PathBuf,
         /// Where to start, in seconds.
@@ -249,7 +250,7 @@ fn play(project: &Path, from: Time, seconds: f64, no_audio: bool) -> Result<(), 
     let mut offsets: Vec<f64> = vec![];
     while clock.now().as_f64() < end {
         if let Some(shown) = player.tick() {
-            // How far into its own frame the clock is when the frame appears.
+            // Lateness: how far into its own frame the clock is when it appears.
             offsets.push((clock.now().as_f64() - shown.time.as_f64()) * 1000.0);
         }
         let now = clock.now().as_f64();
@@ -265,7 +266,7 @@ fn play(project: &Path, from: Time, seconds: f64, no_audio: bool) -> Result<(), 
                 .unwrap_or(0);
             let (mean, worst) = summarise(&offsets);
             println!(
-                "{now:7.2}s  shown {:3}  dropped {:3}  audio underruns {underruns}  A/V offset mean {mean:5.1} ms, worst {worst:5.1} ms",
+                "{now:7.2}s  shown {:3}  dropped {:3}  audio underruns {underruns}  frame lateness mean {mean:5.1} ms, worst {worst:5.1} ms",
                 stats.shown - last.shown,
                 stats.dropped - last.dropped,
             );
@@ -289,7 +290,7 @@ fn play(project: &Path, from: Time, seconds: f64, no_audio: bool) -> Result<(), 
     Ok(())
 }
 
-/// Mean and largest of a set of millisecond offsets.
+/// Mean and largest of a set of millisecond lateness values.
 fn summarise(offsets: &[f64]) -> (f64, f64) {
     if offsets.is_empty() {
         return (0.0, 0.0);

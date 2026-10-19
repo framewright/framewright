@@ -67,7 +67,10 @@ impl SampleClock {
         if !self.running.load(Ordering::Acquire) {
             return position - latency;
         }
-        let since = self.epoch.elapsed().as_nanos() as u64 - self.stamped.load(Ordering::Acquire);
+        // Read the stamp first: the audio thread may stamp again at any moment,
+        // and a stamp newer than `elapsed` must not underflow.
+        let stamped = self.stamped.load(Ordering::Acquire);
+        let since = (self.epoch.elapsed().as_nanos() as u64).saturating_sub(stamped);
         // Never run more than ~50 ms past the last block, so a stalled device
         // stalls the picture rather than letting it drift.
         let since = (since as f64 * self.rate as f64 / 1e9).min(self.rate as f64 / 20.0) as i64;

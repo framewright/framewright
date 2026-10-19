@@ -288,12 +288,17 @@ fw-plugin    the node contract: node type descriptions, parameter schemas, regis
 fw-doc       document model, containers, commands, undo, serialisation, migrations
 fw-compile   authoring tree → flat evaluation graph(s): video and audio schedules
 fw-render    GPU executor, resource pool, content-hashed cache, scheduling
-fw-audio     real-time audio engine
-fw-media     decode/encode, image I/O (FFmpeg lives only here)
+fw-media     decode/encode, image I/O, probe cache (FFmpeg lives only here)
+fw-audio     real-time audio engine, streaming, master clock, device output
+fw-playback  frames chosen by the master clock, rendered ahead
 fw-ops       built-in nodes, registered via fw-plugin
 fw-script    command protocol server, expression language
-fw-cli       headless render/inspect
+fw-cli       headless render/inspect/play
 fw-app       UI
+
+Development only, never shipped:
+fw-testmedia synthetic test clips made with the ffmpeg CLI
+fw-bench     benchmark harness and performance budgets
 ```
 
 **[Decided]** (from step 1) `fw-plugin` sits directly above `fw-core`, because the document needs parameter schemas to check edits and decide which nodes are unknown. Plugin hosts (shader nodes, WASM, CLAP) get their own crates later, so the document never pulls in wasmtime.

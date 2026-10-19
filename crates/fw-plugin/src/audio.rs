@@ -32,6 +32,9 @@ pub trait AudioProcessor: Send {
 
 /// One block of audio. Samples are interleaved; `input` and `output` hold
 /// `frames × channels` values.
+///
+/// TODO: decide and document whether `output` arrives zeroed or processors
+/// must write every sample (today they write every sample).
 pub struct AudioBlock<'a> {
     pub input: &'a [f32],
     pub output: &'a mut [f32],

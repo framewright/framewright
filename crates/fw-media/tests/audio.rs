@@ -67,3 +67,35 @@ fn seeking_matches_reading_straight_through() {
         assert!(worst < 1e-4, "seek to {start}: off by {worst}");
     }
 }
+
+#[test]
+fn sound_lines_up_with_the_picture_from_the_same_file() {
+    // The sound starts 0.25 s after the picture and the container's clock
+    // starts at 2 s; the click is 1 s after the first frame.
+    let path = fw_testmedia::sync_click();
+    let video = fw_media::probe_video(&path).unwrap();
+    assert_eq!(video.origin(), fw_core::Time::from_seconds(2));
+    let mut reader = AudioReader::open(&path, 48000, Some(video.origin())).unwrap();
+    let samples = read(&mut reader, 96000);
+    let click = samples
+        .iter()
+        .step_by(CHANNELS)
+        .position(|v| v.abs() > 0.5)
+        .expect("a click");
+    assert!(
+        (47952..=48048).contains(&click),
+        "click at sample {click}, expected 48000 (1 s)"
+    );
+
+    // And the frame on screen at 1 s is frame 24.
+    let mut frames = fw_media::VideoReader::open_probed(&path, &video).unwrap();
+    let at = video
+        .frames
+        .frame_at(fw_core::Time::from_seconds(1))
+        .unwrap();
+    let frame = frames.frame(at).unwrap();
+    assert_eq!(
+        (frame.pixel(5, 5)[0] * 255.0).round() as u8,
+        fw_testmedia::level(24)
+    );
+}

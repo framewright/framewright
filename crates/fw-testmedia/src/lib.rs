@@ -162,6 +162,40 @@ pub fn hd_h264() -> PathBuf {
     ensure(&HD_H264)
 }
 
+/// Counting frames at 24 fps with sound that starts 0.25 s after the
+/// picture, in a container whose clock starts at 2 s. The sound is silent
+/// except for a click 0.75 s into it: 1 s after the first frame, so it
+/// belongs with frame 24.
+const SYNC_CLICK: Recipe = Recipe {
+    name: "sync-click.mkv",
+    args: &[
+        "-f",
+        "lavfi",
+        "-i",
+        "nullsrc=s=64x32:r=24:d=2,format=gbrp",
+        "-itsoffset",
+        "0.25",
+        "-f",
+        "lavfi",
+        "-i",
+        "aevalsrc='if(between(t,0.75,0.7505),0.9,0)':s=48000:d=1.5",
+        "-vf",
+        "geq=r='mod(N*8,256)':g='mod(N*8,256)':b='mod(N*8,256)'",
+        "-c:v",
+        "ffv1",
+        "-g",
+        "1",
+        "-c:a",
+        "pcm_s16le",
+        "-output_ts_offset",
+        "2",
+    ],
+};
+
+pub fn sync_click() -> PathBuf {
+    ensure(&SYNC_CLICK)
+}
+
 pub fn count_24fps() -> PathBuf {
     ensure(&COUNT_CFR)
 }
