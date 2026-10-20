@@ -13,7 +13,7 @@ use fw_core::NodeId;
 use fw_core::id::{IdGen, RandomIds};
 use fw_doc::{Command, Document, Edge, Graph, Node, PortRef};
 use fw_engine::Engine;
-use fw_plugin::{NodeTypeDesc, PortType, Registry};
+use fw_plugin::{INPUT_TYPE, NodeTypeDesc, OUTPUT_TYPE, PortType, Registry};
 
 use crate::app::Edit;
 use crate::controls::{Gestures, Number};
@@ -158,7 +158,7 @@ pub fn node_editor(
     }
 
     let canvas = ui.max_rect();
-    let (placed, ports) = lay_out(doc, registry, graph);
+    let (placed, ports) = lay_out(doc, registry, container, graph);
     let mut view = *state.views.entry(container).or_default();
     if !view.framed && canvas.width() > 0.0 {
         frame(&mut view, canvas, &placed);
@@ -198,7 +198,8 @@ pub fn node_editor(
     if (background.secondary_clicked() || tab)
         && let Some(at) = pointer
     {
-        state.library = Some(Library::new(at, view.to_editor(canvas, at)));
+        let supplied = container != doc.root();
+        state.library = Some(Library::new(at, view.to_editor(canvas, at), supplied));
     }
     if hovered && !typing && ui.input(|i| i.key_pressed(egui::Key::F)) {
         frame(&mut view, canvas, &placed);
@@ -568,7 +569,12 @@ fn sentence(message: &str) -> String {
 }
 
 /// Lays out the graph's nodes and ports in editor units.
-fn lay_out(doc: &Document, registry: &Registry, graph: &Graph) -> (Vec<Placed>, Vec<Port>) {
+fn lay_out(
+    doc: &Document,
+    registry: &Registry,
+    container: NodeId,
+    graph: &Graph,
+) -> (Vec<Placed>, Vec<Port>) {
     let auto = auto_positions(graph);
     let mut placed = vec![];
     let mut ports = vec![];
@@ -604,7 +610,7 @@ fn lay_out(doc: &Document, registry: &Registry, graph: &Graph) -> (Vec<Placed>, 
             id,
             rect,
             name: node.name().to_owned(),
-            detail: detail(node, desc),
+            detail: detail(doc, container, node, desc),
             colour,
             icon,
         });
@@ -658,23 +664,25 @@ fn auto_positions(graph: &Graph) -> BTreeMap<NodeId, Pos2> {
 
 /// The second line on a node: the file it reads, what it is when its name
 /// doesn't say, or its first number.
-fn detail(node: &Node, desc: Option<&NodeTypeDesc>) -> String {
+fn detail(doc: &Document, container: NodeId, node: &Node, desc: Option<&NodeTypeDesc>) -> String {
     let Some(known) = node.as_known() else {
         return format!("{} isn't installed", node.type_id());
     };
     let Some(desc) = desc else {
         return known.type_id.clone();
     };
-    let media = known.params.values().find_map(|p| match p {
-        fw_doc::Param::Constant(fw_plugin::ParamValue::Media(m)) if !m.path.is_empty() => {
-            std::path::Path::new(&m.path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-        }
-        _ => None,
-    });
-    if let Some(media) = media {
+    let nested = container != doc.root();
+    // Inside a clip, Input is the clip's media and Output goes back to the timeline.
+    let from = if nested && known.type_id == INPUT_TYPE {
+        doc.node(container).and_then(Node::as_known)
+    } else {
+        Some(known)
+    };
+    if let Some(media) = from.and_then(media_name) {
         return media;
+    }
+    if nested && known.type_id == OUTPUT_TYPE {
+        return format!("→ {}", doc.node(doc.root()).map_or("", Node::name));
     }
     if desc.name != known.name {
         return desc.name.clone();
@@ -696,6 +704,18 @@ fn detail(node: &Node, desc: Option<&NodeTypeDesc>) -> String {
         Some(number.show(value))
     });
     number.unwrap_or_else(|| desc.category.clone())
+}
+
+/// The file name of the first media the node reads.
+fn media_name(node: &fw_doc::KnownNode) -> Option<String> {
+    node.params.values().find_map(|p| match p {
+        fw_doc::Param::Constant(fw_plugin::ParamValue::Media(m)) if !m.path.is_empty() => {
+            std::path::Path::new(&m.path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        }
+        _ => None,
+    })
 }
 
 /// The colour strip and icon for a node's category.

@@ -137,6 +137,80 @@ fn unknown_clips_keep_their_bytes_and_placement() {
 }
 
 #[test]
+fn a_clip_can_hold_a_graph() {
+    let (mut editor, [root, _, _, a, b]) = sample();
+    let mut ids = SequentialIds::new(99);
+    let [gain, sink] = [(); 2].map(|_| ids.next_id());
+    let add = |id, type_id: &str| Command::AddNode {
+        parent: a,
+        id,
+        type_id: type_id.into(),
+        name: None,
+        placement: None,
+    };
+    editor
+        .apply(
+            "Create Clip Graph",
+            vec![
+                Command::MakeGraph { node: a },
+                add(gain, "test.gain"),
+                add(sink, "test.sink"),
+                Command::Connect {
+                    edge: Edge {
+                        from: PortRef::new(gain, "image"),
+                        to: PortRef::new(sink, "image"),
+                    },
+                },
+                Command::SetPosition {
+                    node: gain,
+                    position: Some([10.0, 20.0]),
+                },
+            ],
+        )
+        .unwrap();
+    let doc = editor.doc();
+    doc.check_invariants().unwrap();
+    assert_eq!(doc.graph(a).unwrap().nodes.len(), 2);
+    assert_eq!(doc.parent(gain), Some(a));
+    let text = to_json(doc);
+    assert_eq!(&from_json(&text, editor.registry()).unwrap(), doc);
+
+    let refused =
+        |editor: &mut Editor, command| editor.apply("Refused", vec![command]).unwrap_err();
+    assert!(matches!(
+        refused(&mut editor, Command::MakeGraph { node: a }),
+        CommandError::HasGraph(_)
+    ));
+    assert!(matches!(
+        refused(&mut editor, Command::RemoveGraph { node: a }),
+        CommandError::GraphNotEmpty(_)
+    ));
+    assert!(matches!(
+        refused(&mut editor, Command::RemoveGraph { node: b }),
+        CommandError::NoGraph(_)
+    ));
+    assert!(matches!(
+        refused(&mut editor, Command::MakeGraph { node: root }),
+        CommandError::CantHoldGraph(_)
+    ));
+
+    // Deleting the clip takes its graph; undo brings both back.
+    let with_graph = editor.doc().clone();
+    editor
+        .apply("Delete Clip", vec![Command::RemoveNode { id: a }])
+        .unwrap();
+    assert!(!editor.doc().contains(gain));
+    editor.undo().unwrap();
+    assert_eq!(editor.doc(), &with_graph);
+    editor.undo().unwrap();
+    assert!(
+        editor.doc().graph(a).is_none(),
+        "one undo takes the graph away"
+    );
+    assert!(!editor.doc().contains(gain));
+}
+
+#[test]
 fn editing_rules() {
     let (mut editor, [root, v1, v2, a, _]) = sample();
     let mut ids = SequentialIds::new(99);

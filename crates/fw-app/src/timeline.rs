@@ -9,6 +9,7 @@ use fw_engine::Engine;
 use crate::app::Edit;
 use crate::chrome::AppCommand;
 use crate::controls::Gestures;
+use crate::icons;
 use crate::style::{medium, mono, mono_medium, sans, tokens as t};
 use crate::viewer::{frame_start, timecode};
 
@@ -152,7 +153,7 @@ pub fn timeline(
     }
 
     clips(
-        ui, view, gestures, doc, timeline, &rows, lanes, selected, edits,
+        ui, view, gestures, doc, timeline, &rows, lanes, selected, edits, commands,
     );
 
     // Track headers, over anything scrolled under them.
@@ -276,6 +277,7 @@ fn clips(
     lanes: Rect,
     selected: &mut Option<NodeId>,
     edits: &mut Vec<Edit>,
+    commands: &mut Vec<AppCommand>,
 ) {
     let painter = ui.painter_at(lanes);
     let doc_rate = timeline.settings.rate;
@@ -305,9 +307,25 @@ fn clips(
                 format!("Clip {name}"),
             )
         });
-        if response.clicked() || response.drag_started() {
+        if response.clicked() || response.drag_started() || response.secondary_clicked() {
             *selected = Some(node);
         }
+        if response.double_clicked() {
+            commands.push(AppCommand::OpenInCompose);
+        }
+        response.context_menu(|ui| {
+            ui.set_min_width(220.0);
+            let open = egui::Button::new("Open in Compose").shortcut_text("Enter");
+            if ui
+                .add(open)
+                .on_hover_text("Build a node graph inside this clip")
+                .clicked()
+            {
+                *selected = Some(node);
+                commands.push(AppCommand::OpenInCompose);
+                ui.close();
+            }
+        });
         if response.drag_started()
             && let Some(pos) = response.interact_pointer_pos()
         {
@@ -364,7 +382,16 @@ fn clips(
             ),
             StrokeKind::Inside,
         );
-        let label_area = rect.shrink2(vec2(7.0, 4.0)).intersect(lanes);
+        let mut label_area = rect.shrink2(vec2(7.0, 4.0)).intersect(lanes);
+        // A clip with a graph inside says so.
+        if doc.graph(node).is_some() && label_area.width() > 30.0 {
+            let badge = Rect::from_min_size(
+                pos2(label_area.right() - 12.0, rect.top() + 6.0),
+                vec2(12.0, 12.0),
+            );
+            icons::paint(&painter, badge, icons::GRAPH, t::TEXT_BRIGHT, 1.5, false);
+            label_area.max.x -= 16.0;
+        }
         if label_area.width() > 12.0 {
             ui.painter_at(label_area).text(
                 pos2(rect.left().max(lanes.left()) + 7.0, rect.top() + 12.0),

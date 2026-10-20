@@ -3,10 +3,10 @@
 use std::collections::BTreeMap;
 
 use fw_core::{ColorSpace, ContentHash, KeyHasher, NodeId, Rect, Time};
-use fw_doc::{Document, KeyTime, Node, PortRef, Timeline, TrackKind};
+use fw_doc::{Contents, Document, Graph, KeyTime, Node, PortRef, Timeline, TrackKind};
 use fw_plugin::{
-    ImageHandle, ImageInfo, MediaRef, NodeError, OUTPUT_TYPE, PixelOp, PlanBuilder, Quality,
-    Registry, Request, ResolvedParams, SpaceNeed,
+    INPUT_TYPE, ImageBehaviour, ImageHandle, ImageInfo, MediaRef, NodeError, OUTPUT_TYPE, PixelOp,
+    PlanBuilder, Quality, Registry, Request, ResolvedParams, SpaceNeed,
 };
 
 use crate::codegen;
@@ -67,6 +67,9 @@ struct Lowering<'a> {
     ops: Vec<Op>,
     /// Nodes already lowered, by node and request, so shared upstream nodes are emitted once.
     done: BTreeMap<(NodeId, ContentHash), ImageHandle>,
+    /// What each graph being lowered gets from the node holding it, innermost
+    /// last: the image its Input nodes stand for.
+    sources: Vec<Option<ImageHandle>>,
 }
 
 pub fn compile(
@@ -83,6 +86,7 @@ pub fn compile(
         options,
         ops: vec![],
         done: BTreeMap::new(),
+        sources: vec![],
     };
     let output = if let Some(graph) = doc.graph(root) {
         let outputs: Vec<NodeId> = graph
@@ -317,18 +321,32 @@ impl Lowering<'_> {
                 )));
             }
         };
-        if known.contents.is_some() {
-            // TODO: lower nested containers (design §4: containers lower themselves).
-            return Err(fail("nested containers can't be rendered yet".into()));
+        if known.type_id == INPUT_TYPE {
+            let source = self.sources.last().copied().flatten().ok_or_else(|| {
+                fail(
+                    "an Input node only works inside a node that supplies an image, such as a clip"
+                        .into(),
+                )
+            })?;
+            self.done.insert((id, request_key), source);
+            return Ok(source);
         }
+        let graph = match &known.contents {
+            None => None,
+            Some(Contents::Graph(graph)) => Some(graph),
+            Some(Contents::Timeline(_)) => {
+                // TODO: lower nested timelines (design §4: containers lower themselves).
+                return Err(fail("nested timelines can't be rendered yet".into()));
+            }
+        };
         let ty = self
             .registry
             .get(&known.type_id)
             .ok_or_else(|| fail(format!("node type {} isn't registered", known.type_id)))?;
-        let behaviour = ty
-            .image
-            .clone()
-            .ok_or_else(|| fail(format!("{} doesn't produce images", ty.desc.name)))?;
+        let behaviour = ty.image.clone();
+        if behaviour.is_none() && graph.is_none() {
+            return Err(fail(format!("{} doesn't produce images", ty.desc.name)));
+        }
 
         let mut params = ResolvedParams::default();
         for p in &ty.desc.params {
@@ -341,10 +359,38 @@ impl Lowering<'_> {
             params.0.insert(p.id.clone(), value);
         }
 
-        let input_requests = behaviour.requirements(&params, request, ty.desc.inputs.len());
-        let mut inputs = vec![];
         let mut node_path = path.to_vec();
         node_path.push(id);
+        if let Some(graph) = graph {
+            let contents = self.contents(
+                &node_path,
+                graph,
+                behaviour.as_deref(),
+                &params,
+                request,
+                clock,
+            )?;
+            let Some(behaviour) = behaviour else {
+                // A plain Graph container delivers what its graph does.
+                self.done.insert((id, request_key), contents);
+                return Ok(contents);
+            };
+            return self.emit(
+                id,
+                &known.name,
+                ty,
+                behaviour.as_ref(),
+                &params,
+                request,
+                &[contents],
+                &node_path,
+                request_key,
+                clock,
+            );
+        }
+        let behaviour = behaviour.expect("checked above");
+        let input_requests = behaviour.requirements(&params, request, ty.desc.inputs.len());
+        let mut inputs = vec![];
         for (index, (port, input_request)) in ty.desc.inputs.iter().zip(&input_requests).enumerate()
         {
             // TODO: optional inputs, once a node has one.
@@ -360,7 +406,108 @@ impl Lowering<'_> {
             };
             inputs.push(self.convert(image, wanted));
         }
+        self.emit(
+            id,
+            &known.name,
+            ty,
+            behaviour.as_ref(),
+            &params,
+            request,
+            &inputs,
+            &node_path,
+            request_key,
+            clock,
+        )
+    }
 
+    /// Lowers the graph inside the node at the end of `path` from its Output
+    /// node, with the node's source standing in for its Input nodes.
+    fn contents(
+        &mut self,
+        path: &[NodeId],
+        graph: &Graph,
+        behaviour: Option<&dyn ImageBehaviour>,
+        params: &ResolvedParams,
+        request: &Request,
+        clock: Clock,
+    ) -> Result<ImageHandle, CompileError> {
+        let container = *path.last().expect("the path ends at the container");
+        let of_type = |type_id: &str| -> Vec<NodeId> {
+            graph
+                .nodes
+                .iter()
+                .copied()
+                .filter(|id| self.doc.node(*id).map(Node::type_id) == Some(type_id))
+                .collect()
+        };
+        let output = match of_type(OUTPUT_TYPE).as_slice() {
+            [one] => *one,
+            [] => return Err(self.node_error(container, "its graph has no Output node".into())),
+            many => {
+                return Err(self.node_error(
+                    container,
+                    format!(
+                        "its graph has {} Output nodes; one is supported for now",
+                        many.len()
+                    ),
+                ));
+            }
+        };
+        let source = match behaviour {
+            Some(behaviour) if !of_type(INPUT_TYPE).is_empty() => {
+                let name = self.doc.node(container).map_or("", Node::name).to_owned();
+                let mut key = KeyHasher::new("fw.source");
+                key.node_id(container).hash(&request_key(request));
+                clock.hash_into(&mut key);
+                let mut builder = NodeBuilder {
+                    lowering: self,
+                    node_key: key.finish(),
+                    origin: Origin::Node {
+                        compiled_id: path_hash(path),
+                        node: container,
+                        name,
+                    },
+                    next_op: 0,
+                    bad_handle: None,
+                    source_time: clock.source,
+                };
+                let result = behaviour.source(params, request, &mut builder);
+                let bad = builder.bad_handle;
+                let source = result.map_err(|NodeError(m)| self.node_error(container, m))?;
+                if let Some(h) = bad.or(source.filter(|h| h.0 as usize >= self.ops.len())) {
+                    return Err(self
+                        .node_error(container, format!("used image %{} that doesn't exist", h.0)));
+                }
+                source
+            }
+            _ => None,
+        };
+        self.sources.push(source);
+        let result = self.node(path, output, request, clock);
+        self.sources.pop();
+        result
+    }
+
+    /// Keys a node's work and asks it to add its operations.
+    #[allow(clippy::too_many_arguments)]
+    fn emit(
+        &mut self,
+        id: NodeId,
+        name: &str,
+        ty: &fw_plugin::NodeType,
+        behaviour: &dyn ImageBehaviour,
+        params: &ResolvedParams,
+        request: &Request,
+        inputs: &[ImageHandle],
+        node_path: &[NodeId],
+        request_key: ContentHash,
+        clock: Clock,
+    ) -> Result<ImageHandle, CompileError> {
+        let fail = |message: String| CompileError::Node {
+            node: id,
+            name: name.to_owned(),
+            message,
+        };
         let mut key = KeyHasher::new("fw.node");
         key.str(&ty.desc.id)
             .u32(ty.desc.version)
@@ -369,7 +516,7 @@ impl Lowering<'_> {
             key.str(name);
             value.hash_into(&mut key);
         }
-        for input in &inputs {
+        for input in inputs {
             key.hash(&self.ops[input.0 as usize].key);
         }
         key.hash(&request_key_without_time(request));
@@ -377,20 +524,20 @@ impl Lowering<'_> {
             key.time(request.time);
         }
 
-        let compiled_id = path_hash(&node_path);
+        let compiled_id = path_hash(node_path);
         let mut builder = NodeBuilder {
             lowering: self,
             node_key: key.finish(),
             origin: Origin::Node {
                 compiled_id,
                 node: id,
-                name: known.name.clone(),
+                name: name.to_owned(),
             },
             next_op: 0,
             bad_handle: None,
             source_time: clock.source,
         };
-        let result = behaviour.emit(&params, request, &inputs, &mut builder);
+        let result = behaviour.emit(params, request, inputs, &mut builder);
         let bad_handle = builder.bad_handle;
         let output = result.map_err(|NodeError(message)| fail(message))?;
         if let Some(h) = bad_handle.or((output.0 as usize >= self.ops.len()).then_some(output)) {

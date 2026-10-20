@@ -28,16 +28,12 @@ pub fn inspector(
     gestures: &mut Gestures,
     engine: &Engine,
     selected: Option<NodeId>,
+    nothing_selected: &str,
     edits: &mut Vec<Edit>,
 ) {
     let doc = engine.document();
     let Some((id, node)) = selected.and_then(|id| Some((id, doc.node(id)?))) else {
-        let what = if doc.timeline(doc.root()).is_some() {
-            "Select a clip to see its settings"
-        } else {
-            "Select a node to see its settings"
-        };
-        empty(ui, what);
+        empty(ui, nothing_selected);
         return;
     };
     let Some(known) = node.as_known() else {

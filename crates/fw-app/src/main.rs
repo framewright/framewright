@@ -52,6 +52,9 @@ struct Args {
     /// Start with this node selected, by id.
     #[arg(long)]
     select: Option<fw_core::NodeId>,
+    /// Open the selected clip in Compose, as the Clip menu would.
+    #[arg(long, requires = "select")]
+    compose: bool,
     /// The window's size in logical pixels.
     #[arg(long, default_value = "1600x1000", value_parser = parse_size)]
     size: (f64, f64),
@@ -110,6 +113,9 @@ impl ApplicationHandler<UserEvent> for Shell {
             Ok((window, mut engine)) => {
                 let mut app = App::new(&engine);
                 app.select(self.args.select);
+                if self.args.compose {
+                    app.run(chrome::AppCommand::OpenInCompose, &mut engine);
+                }
                 if let Some(time) = self.args.seek
                     && let Err(e) = engine.request(fw_engine::Request::Seek { time })
                 {

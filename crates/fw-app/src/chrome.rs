@@ -41,6 +41,10 @@ pub enum AppCommand {
     GoToStart,
     GoToEnd,
     ResetLayout,
+    /// Steps into the selected clip's graph, giving it one if it has none.
+    OpenInCompose,
+    /// Shows the workspace with this name.
+    Workspace(&'static str),
 }
 
 /// What the title bar shows.
@@ -52,6 +56,9 @@ pub struct TitleBar<'a> {
     pub maximised: bool,
     /// Something is selected that Delete would remove.
     pub selection: bool,
+    /// Whether a clip is selected, or `None` when the document has no clips
+    /// (and so no Clip menu).
+    pub clip_selected: Option<bool>,
 }
 
 pub fn title_bar(
@@ -192,6 +199,18 @@ fn menus(ui: &mut Ui, bar: &TitleBar, commands: &mut Vec<AppCommand>) {
         ui.separator();
         item(ui, "Delete", "Del", bar.selection, AppCommand::Delete);
     });
+    if let Some(selected) = bar.clip_selected {
+        ui.menu_button(title("Clip"), |ui| {
+            ui.set_min_width(220.0);
+            item(
+                ui,
+                "Open in Compose",
+                "Enter",
+                selected,
+                AppCommand::OpenInCompose,
+            );
+        });
+    }
     ui.menu_button(title("Playback"), |ui| {
         ui.set_min_width(220.0);
         item(ui, "Play / Pause", "Space", true, AppCommand::PlayPause);
@@ -234,6 +253,7 @@ pub fn shortcuts(ctx: &egui::Context, commands: &mut Vec<AppCommand>) {
         (Key::L, AppCommand::Play),
         (Key::K, AppCommand::Pause),
         (Key::Backspace, AppCommand::Delete),
+        (Key::Enter, AppCommand::OpenInCompose),
     ];
     let typing = ctx.egui_wants_keyboard_input();
     ctx.input_mut(|input| {
@@ -338,6 +358,7 @@ pub fn workspace_bar(
     active: usize,
     left: &str,
     right: &str,
+    commands: &mut Vec<AppCommand>,
 ) {
     let r = ui.max_rect();
     let painter = ui.painter();
@@ -367,7 +388,23 @@ pub fn workspace_bar(
     let mut x = r.center().x - total / 2.0;
     for (i, workspace) in workspaces.iter().enumerate() {
         let b = Rect::from_min_size(pos2(x, r.top()), vec2(widths[i], WORKSPACE_BAR_HEIGHT));
-        let response = ui.interact(b, ui.scope_id().with(("workspace", i)), Sense::hover());
+        let sense = if workspace.built {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let response = ui.interact(b, ui.scope_id().with(("workspace", i)), sense);
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::Role::Button,
+                workspace.built,
+                i == active,
+                workspace.name,
+            )
+        });
+        if response.clicked() && i != active {
+            commands.push(AppCommand::Workspace(workspace.name));
+        }
         let on = i == active;
         let text = match (on, workspace.built, response.hovered()) {
             (true, _, _) => t::TEXT_BRIGHT,

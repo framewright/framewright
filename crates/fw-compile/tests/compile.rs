@@ -419,3 +419,41 @@ fn unknown_nodes_fail_with_their_name() {
     let err = compile(&doc, &registry, &SRGB_FILES, &Options::at(Time::ZERO)).unwrap_err();
     assert!(err.to_string().contains("future.blur"), "{err}");
 }
+
+#[test]
+fn an_input_node_needs_a_node_that_supplies_an_image() {
+    let mut s = sample();
+    let input = s.ids.next_id();
+    let root = s.editor.doc().root();
+    s.editor
+        .apply(
+            "Input",
+            vec![
+                Command::AddNode {
+                    parent: root,
+                    id: input,
+                    type_id: "fw.input".into(),
+                    name: None,
+                    placement: None,
+                },
+                Command::Connect {
+                    edge: Edge {
+                        from: PortRef::new(input, "image"),
+                        to: PortRef::new(s.exposure, "image"),
+                    },
+                },
+            ],
+        )
+        .unwrap();
+    let err = compile(
+        s.editor.doc(),
+        s.editor.registry(),
+        &SRGB_FILES,
+        &Options::at(Time::ZERO),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&err, CompileError::Node { node, .. } if *node == input),
+        "{err}"
+    );
+}

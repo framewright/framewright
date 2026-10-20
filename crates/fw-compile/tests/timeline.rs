@@ -294,3 +294,82 @@ fn validate(wgsl: &str) {
     .validate(&module)
     .unwrap_or_else(|e| panic!("{e:?}\n{wgsl}"));
 }
+
+#[test]
+fn a_clip_with_a_graph_shows_its_media_through_the_graph() {
+    let mut s = Sample::new();
+    let v1 = s.v1;
+    let clip = s.clip("clip.mov", placement(v1, "0", "4"));
+    let plain = s.plan("1");
+    let [input, exposure, output] = [(); 3].map(|_| s.ids.next_id());
+    let add = |id, type_id: &str| Command::AddNode {
+        parent: clip,
+        id,
+        type_id: type_id.into(),
+        name: None,
+        placement: None,
+    };
+    let connect = |from, to| Command::Connect {
+        edge: fw_doc::Edge {
+            from: fw_doc::PortRef::new(from, "image"),
+            to: fw_doc::PortRef::new(to, "image"),
+        },
+    };
+    s.editor
+        .apply(
+            "Create Clip Graph",
+            vec![
+                Command::MakeGraph { node: clip },
+                add(input, "fw.input"),
+                add(output, "fw.output"),
+                connect(input, output),
+            ],
+        )
+        .unwrap();
+    assert_eq!(
+        shown(&s.plan("1")),
+        "clip.mov@1",
+        "Input is the clip's media"
+    );
+    s.editor
+        .apply(
+            "Add Exposure",
+            vec![
+                add(exposure, "fw.exposure"),
+                connect(input, exposure),
+                connect(exposure, output),
+            ],
+        )
+        .unwrap();
+    set(&mut s, exposure, "exposure", ParamValue::Float(1.0));
+    let plan = s.plan("1");
+    assert_eq!(shown(&plan), "clip.mov@1");
+    assert!(plan.describe().contains("exposure"), "{}", plan.describe());
+    assert_ne!(plan.output_key(), plain.output_key());
+    assert_ne!(
+        plan.output_key(),
+        s.plan("1.5").output_key(),
+        "frames still follow the source clock"
+    );
+    for step in &plan.steps {
+        if let Step::Kernel(k) = step {
+            validate(&k.wgsl);
+        }
+    }
+
+    s.editor
+        .apply("Delete", vec![Command::RemoveNode { id: output }])
+        .unwrap();
+    let err = compile(
+        s.editor.doc(),
+        s.editor.registry(),
+        &FakeMedia,
+        &Options::at(t("1")),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&err, CompileError::Node { node, .. } if *node == clip),
+        "{err}"
+    );
+    assert!(err.to_string().contains("no Output"), "{err}");
+}

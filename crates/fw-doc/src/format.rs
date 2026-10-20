@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
-use crate::command::check_node;
+use crate::command::{check_node, contents_allowed};
 use crate::document::Document;
 use crate::node::{Contents, Edge, Graph, KnownNode, Node, UnknownNode};
 use crate::param::Param;
@@ -317,7 +317,7 @@ fn read_node(
             return Err(err("a node can't hold both a graph and a timeline".into()));
         }
     };
-    if kind != desc.container {
+    if !contents_allowed(kind, desc) {
         return Err(err(format!("contents don't match the type {}", desc.id)));
     }
     let mut contents = None;

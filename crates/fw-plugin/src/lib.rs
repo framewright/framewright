@@ -12,8 +12,8 @@ pub mod value;
 
 pub use audio::{AudioBehaviour, AudioBlock, AudioProcessor};
 pub use desc::{
-    CLIP_TYPE, ChoiceOption, ContainerKind, GRAPH_TYPE, HandleKind, NodeTypeDesc, OUTPUT_TYPE,
-    ParamDesc, ParamKind, PortDesc, PortType, TIMELINE_TYPE, Unit,
+    CLIP_TYPE, ChoiceOption, ContainerKind, GRAPH_TYPE, HandleKind, INPUT_TYPE, NodeTypeDesc,
+    OUTPUT_TYPE, ParamDesc, ParamKind, PortDesc, PortType, TIMELINE_TYPE, Unit,
 };
 pub use image::{
     ImageBehaviour, ImageHandle, ImageInfo, NodeError, PixelOp, PlanBuilder, Quality, Request,

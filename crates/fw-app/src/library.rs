@@ -2,7 +2,7 @@
 //! opened in the node editor with Tab or a right-click.
 
 use egui::{Align2, CornerRadius, Key, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
-use fw_plugin::{CLIP_TYPE, NodeTypeDesc, Registry};
+use fw_plugin::{CLIP_TYPE, INPUT_TYPE, NodeTypeDesc, Registry};
 
 use crate::style::{sans, tokens as t};
 
@@ -17,6 +17,8 @@ pub struct Library {
     /// Where a node added from it lands, in editor units.
     pub at: Pos2,
     query: String,
+    /// Whether the graph's container supplies an image, so Input means something.
+    supplied: bool,
     /// The type Enter adds, as an index into the matches.
     highlight: usize,
     focused: bool,
@@ -30,11 +32,12 @@ pub enum Outcome {
 }
 
 impl Library {
-    pub fn new(screen: Pos2, at: Pos2) -> Library {
+    pub fn new(screen: Pos2, at: Pos2, supplied: bool) -> Library {
         Library {
             screen,
             at,
             query: String::new(),
+            supplied,
             highlight: 0,
             focused: false,
         }
@@ -42,13 +45,14 @@ impl Library {
 }
 
 /// The types a user can add to a graph, by category then name.
-fn addable<'a>(registry: &'a Registry, query: &str) -> Vec<&'a NodeTypeDesc> {
+fn addable<'a>(registry: &'a Registry, query: &str, supplied: bool) -> Vec<&'a NodeTypeDesc> {
     let query = query.trim().to_lowercase();
     let mut types: Vec<&NodeTypeDesc> = registry
         .iter()
         .map(|ty| &ty.desc)
         // Containers are made by their own commands, and clips belong on timelines.
         .filter(|d| d.container.is_none() && d.id != CLIP_TYPE)
+        .filter(|d| supplied || d.id != INPUT_TYPE)
         .filter(|d| {
             query.is_empty()
                 || d.name.to_lowercase().contains(&query)
@@ -60,7 +64,7 @@ fn addable<'a>(registry: &'a Registry, query: &str) -> Vec<&'a NodeTypeDesc> {
 }
 
 pub fn show(ui: &mut Ui, library: &mut Library, registry: &Registry) -> Outcome {
-    let types = addable(registry, &library.query);
+    let types = addable(registry, &library.query, library.supplied);
     let (escape, enter, down, up) = ui.input_mut(|i| {
         (
             i.consume_key(egui::Modifiers::NONE, Key::Escape),

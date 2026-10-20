@@ -16,6 +16,10 @@ pub const CLIP_TYPE: &str = "fw.clip";
 /// The type id of the Output node, which marks what a Graph container delivers.
 pub const OUTPUT_TYPE: &str = "fw.output";
 
+/// The type id of the Input node: inside a node's graph, what the node
+/// supplies (a clip's media). See [`crate::ImageBehaviour::source`].
+pub const INPUT_TYPE: &str = "fw.input";
+
 /// Everything the engine and UI need to know about a node type without running it.
 ///
 /// The parameter schema is the single source of truth for the inspector,
@@ -40,6 +44,10 @@ pub struct NodeTypeDesc {
     pub varies_with_time: bool,
     /// Set when the type stores its contents in a container structure.
     pub container: Option<ContainerKind>,
+    /// Set when a node of this type may be given a graph inside it (Open in
+    /// Compose). Its image behaviour then receives the graph's result as its
+    /// one input.
+    pub can_hold_graph: bool,
 }
 
 impl NodeTypeDesc {

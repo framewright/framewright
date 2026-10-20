@@ -6,6 +6,7 @@
 mod color;
 mod exposure;
 mod graph;
+mod input;
 mod output;
 mod read_image;
 mod timeline;
@@ -20,6 +21,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegistryError> {
     registry.register(read_image::node_type())?;
     registry.register(exposure::node_type())?;
     registry.register(output::node_type())?;
+    registry.register(input::node_type())?;
     registry.register(timeline::timeline_type())?;
     registry.register(timeline::clip_type())?;
     Ok(())
@@ -42,6 +44,7 @@ mod tests {
             "fw.read_image",
             "fw.exposure",
             "fw.output",
+            "fw.input",
             "fw.timeline",
             "fw.clip",
         ] {

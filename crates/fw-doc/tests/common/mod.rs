@@ -17,12 +17,14 @@ pub fn desc(id: &str, name: &str) -> NodeTypeDesc {
         params: vec![],
         varies_with_time: false,
         container: None,
+        can_hold_graph: false,
     }
 }
 
 pub fn graph_type() -> NodeTypeDesc {
     NodeTypeDesc {
         container: Some(ContainerKind::Graph),
+        can_hold_graph: false,
         ..desc("fw.graph", "Graph")
     }
 }
@@ -72,6 +74,7 @@ pub fn sink_type() -> NodeTypeDesc {
 pub fn group_type() -> NodeTypeDesc {
     NodeTypeDesc {
         container: Some(ContainerKind::Graph),
+        can_hold_graph: false,
         inputs: vec![PortDesc::new("image", "Image", PortType::Image)],
         outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
         ..desc("test.group", "Group")
@@ -81,6 +84,7 @@ pub fn group_type() -> NodeTypeDesc {
 pub fn timeline_type() -> NodeTypeDesc {
     NodeTypeDesc {
         container: Some(ContainerKind::Timeline),
+        can_hold_graph: false,
         outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
         ..desc("fw.timeline", "Timeline")
     }
@@ -93,6 +97,7 @@ pub fn clip_type() -> NodeTypeDesc {
             ParamDesc::media("file", "File"),
             ParamDesc::float("opacity", "Opacity", Unit::Percent, 100.0),
         ],
+        can_hold_graph: true,
         ..desc("test.clip", "Clip")
     }
 }

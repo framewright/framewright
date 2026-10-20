@@ -22,6 +22,7 @@ pub fn timeline_type() -> NodeType {
         params: vec![],
         varies_with_time: false,
         container: Some(ContainerKind::Timeline),
+        can_hold_graph: false,
     })
 }
 
@@ -48,8 +49,9 @@ pub fn clip_type() -> NodeType {
         // still image keys the same at every moment.
         varies_with_time: false,
         container: None,
+        // Open in Compose gives a clip a graph, starting from its media.
+        can_hold_graph: true,
     };
-    // TODO: "Open in Compose" turns a plain clip into a Graph container in place.
     NodeType::new(desc)
         .with_image(Clip, "clip r2")
         .with_audio(ClipAudio)
@@ -58,18 +60,35 @@ pub fn clip_type() -> NodeType {
 struct Clip;
 
 impl ImageBehaviour for Clip {
-    fn emit(
+    /// The clip's media, which its graph's Input node stands for.
+    fn source(
         &self,
         params: &ResolvedParams,
         _request: &Request,
-        _inputs: &[ImageHandle],
         plan: &mut dyn PlanBuilder,
-    ) -> Result<ImageHandle, NodeError> {
+    ) -> Result<Option<ImageHandle>, NodeError> {
         let media = params.media("file");
         if media.path.is_empty() {
             return Err(NodeError("no media".into()));
         }
-        let image = plan.load(media, space_from_choice(params.text("space")))?;
+        plan.load(media, space_from_choice(params.text("space")))
+            .map(Some)
+    }
+
+    /// The media, or the clip's graph when it has one, at the clip's opacity.
+    fn emit(
+        &self,
+        params: &ResolvedParams,
+        request: &Request,
+        inputs: &[ImageHandle],
+        plan: &mut dyn PlanBuilder,
+    ) -> Result<ImageHandle, NodeError> {
+        let image = match inputs.first() {
+            Some(graph) => *graph,
+            None => self
+                .source(params, request, plan)?
+                .expect("a clip supplies its media"),
+        };
         let opacity = params.f64("opacity") / 100.0;
         if opacity == 1.0 {
             return Ok(image);

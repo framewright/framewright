@@ -153,7 +153,20 @@ pub trait ImageBehaviour: Send + Sync {
         vec![request.clone(); inputs]
     }
 
-    /// Adds this node's operations and returns its output.
+    /// What this node supplies to a graph inside it: the image the graph's
+    /// Input node stands for, such as a clip's media. `None` when it supplies
+    /// nothing.
+    fn source(
+        &self,
+        _params: &ResolvedParams,
+        _request: &Request,
+        _plan: &mut dyn PlanBuilder,
+    ) -> Result<Option<ImageHandle>, NodeError> {
+        Ok(None)
+    }
+
+    /// Adds this node's operations and returns its output. When the node holds
+    /// a graph, `inputs` is that graph's result alone.
     fn emit(
         &self,
         params: &ResolvedParams,

@@ -277,3 +277,81 @@ fn space_plays_and_pauses() {
         "the playhead moved while playing"
     );
 }
+
+fn clip_graph(engine: &Engine, clip: NodeId) -> Option<usize> {
+    engine.document().graph(clip).map(|g| g.nodes.len())
+}
+
+#[test]
+fn open_in_compose_from_the_clip_menu_and_back() {
+    let Project { _dir, clip, engine } = project();
+    let mut harness = harness(engine);
+    harness.run_steps(2);
+    let at = harness.get_by_label("Clip Counting").rect().center();
+    harness.hover_at(at);
+    harness.step();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        harness.step();
+    }
+    harness.run_steps(2);
+    harness.get_by_label_contains("Open in Compose").click();
+    harness.run_steps(3);
+    let engine = &harness.state().1;
+    assert_eq!(clip_graph(engine, clip), Some(2), "Input and Output");
+    assert_eq!(engine.undo_label(), Some("Create Clip Graph"));
+    assert!(harness.query_by_label("Node Input").is_some());
+    assert!(harness.query_by_label("Node Output").is_some());
+    assert!(
+        harness.query_by_label("Clip Counting").is_none(),
+        "the timeline isn't on the Compose page"
+    );
+
+    // The graph passes the media through, so the viewer still shows a frame.
+    let engine = &mut harness.state_mut().1;
+    assert!(engine.wait_for_frame(std::time::Duration::from_secs(20)));
+    assert_eq!(engine.failure(), None);
+
+    harness.get_by_label("← Main Timeline").click();
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Clip Counting").is_some());
+    assert!(harness.query_by_label("Node Input").is_none());
+
+    // Opening again steps into the same graph without another edit.
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Node Input").is_some());
+    assert_eq!(harness.state().1.undo_label(), Some("Create Clip Graph"));
+}
+
+#[test]
+fn undo_while_composing_returns_to_the_timeline() {
+    let Project { _dir, clip, engine } = project();
+    let mut harness = harness(engine);
+    harness.run_steps(2);
+    harness.get_by_label("Compose").click();
+    harness.run_steps(2);
+    assert_eq!(
+        clip_graph(&harness.state().1, clip),
+        None,
+        "nothing to open without a selected clip"
+    );
+    select_clip(&mut harness);
+    harness.get_by_label("Compose").click();
+    harness.run_steps(2);
+    assert_eq!(clip_graph(&harness.state().1, clip), Some(2));
+    assert!(harness.query_by_label("Node Input").is_some());
+
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(3);
+    assert_eq!(clip_graph(&harness.state().1, clip), None);
+    assert!(
+        harness.query_by_label("Clip Counting").is_some(),
+        "back on the Edit page"
+    );
+}

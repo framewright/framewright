@@ -118,6 +118,9 @@ fn validate(desc: &NodeTypeDesc) -> Result<(), String> {
     if desc.version == 0 {
         return Err("versions start at 1".into());
     }
+    if desc.can_hold_graph && desc.container.is_some() {
+        return Err("a container can't also hold a graph".into());
+    }
     // Port ids are saved inside "<node id>:<port>" strings.
     for port in desc.inputs.iter().chain(&desc.outputs) {
         if port.id.is_empty() || port.id.contains(':') {
@@ -166,6 +169,7 @@ mod tests {
             params: vec![ParamDesc::float("gain", "Gain", Unit::Ratio, 1.0)],
             varies_with_time: false,
             container: None,
+            can_hold_graph: false,
         }
     }
 

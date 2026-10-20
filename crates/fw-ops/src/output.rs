@@ -26,6 +26,7 @@ pub fn node_type() -> NodeType {
         )],
         varies_with_time: false,
         container: None,
+        can_hold_graph: false,
     };
     NodeType::new(desc).with_image(Output, "output r1")
 }
