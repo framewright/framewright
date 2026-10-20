@@ -292,6 +292,14 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
     | CPU time for a 47-frame seek | 20 ms | — | 1,070 ms |
 
     The hardware's own decode rate (about 2.6 ms per frame for this bitrate on the 4070) bounds seeking, not the CPU; more decoder threads don't help. Hardware decoding's gain is mostly the CPU it leaves for everything else, plus fast keyframes.
+- **[Decided]** (from the hardware decoding discussion) **Editing copies:** scrubbing and playback in the viewer read an intra-frame copy of each clip, where every frame is a standalone picture, so reaching any frame means decoding only that frame. Export and close inspection read the originals. Copies are ProRes Proxy, 10-bit 4:2:2, at most 1920×1080, written by FFmpeg's `prores` encoder: about 7 minutes per hour of 1080p footage and 14 per hour of 4K on a 6-core CPU, against 26 and 31 for `prores_ks` at similar quality. `prores_ks` stays the choice for ProRes export, where its exact data rates matter. A setting controls them. They are built now, before the UI shell.
+  - Measured on the camera-like 1080p clip: a random seek takes 10 ms from the copy against 92 ms from the original. The old prototype measured 24 ms against 134 ms on 4K.
+  - DNxHR LB was the alternative: as fast to encode, but 8-bit (log and HDR footage graded from an 8-bit copy would band in the viewer but not in export), and it scored 26 dB PSNR against ProRes's 40 on a sharp synthetic test pattern.
+- **[Proposed]** (from the hardware decoding discussion) **How editing copies behave:**
+  - The setting is "Editing copies: Automatic / Off", an app-wide default that each project can override, plus "make copy" and "remove copy" for a single clip. Automatic makes copies only where they help: long-GOP formats (H.264, HEVC, AV1, …) or anything larger than 1080p. Intra-frame sources (ProRes, DNx, image sequences) are used as they are.
+  - Copies live in the project's cache folder, keyed by the source's fingerprint and a versioned profile name (`prores-proxy-1080-v1`), so another format can be added without breaking projects. The project shows how much space they take and can clear them; they are always rebuildable and never change what the project means.
+  - A copy is written front to back by a background job at low priority, and the finished part is used while the rest is still encoding. Until then, and when copies are off, the viewer reads the original.
+  - Frames from a copy carry its own encoding (10-bit 4:2:2, the original's colour tags), so they go through the same GPU conversion as any decoded video.
 - **[Decided]** Images: `image`, `exr` (pure Rust), and `rawler` for RAW, with LibRaw bindings if coverage falls short.
 - **[Decided]** Audio decoding through FFmpeg or `symphonia`, `cpal` for output, `rubato` for resampling. Stream audio; never decode whole files into RAM.
 - **[Decided]** Hardware decode: start with CPU decode plus upload. Zero-copy hardware decode (VA-API or NVDEC into wgpu) later; the old prototype showed it needs wgpu patches. (Superseded by the Vulkan Video proposal above if it's approved: wgpu 30 needs no patches.)
@@ -335,6 +343,8 @@ fw-bench     benchmark harness and performance budgets
 3. The UI shell in the Studio style (after the toolkit bake-off): viewer, parameter editing, undo, frame cache.
 4. Shader-node plugins, to prove early that built-ins use the plugin API.
 5. Then widen: LayerStack and Photo documents, masks, text, mixer, 3D.
+
+**[Decided]** (from the hardware decoding discussion) Before step 3: editing copies, and hardware decoding if its proposal is approved, so scrubbing feels right from the first UI build.
 
 **[Proposed]** (from the optimisation pass) The benchmark clip decodes like camera footage: grain at 50 Mbit/s with 2 s keyframe groups, because the clean test pattern decoded about five times faster than real footage would. A second playback workload blends three layers decoded from three places in one file.
 
