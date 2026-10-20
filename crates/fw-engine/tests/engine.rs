@@ -314,3 +314,119 @@ fn the_frame_cache_keeps_frames_an_edit_and_its_undo_leave_alone() {
         engine.cached_frames()
     );
 }
+
+const TINT: &str = r#"
+id = "test.tint"
+version = 1
+name = "Tint"
+category = "Colour"
+
+[[params]]
+id = "amount"
+name = "Amount"
+type = "float"
+default = 1
+"#;
+
+/// A plugin folder holding Tint with `shader`.
+fn write_tint(folder: &Path, shader: &str) {
+    let plugin = folder.join("tint");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(plugin.join("plugin.toml"), TINT).unwrap();
+    std::fs::write(plugin.join("shader.wgsl"), shader).unwrap();
+}
+
+#[test]
+fn reloading_plugins_renders_with_the_new_shader() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugins = dir.path().join("plugins");
+    write_tint(&plugins, "return vec4<f32>(c.rgb * amount, c.a);");
+    let path = dir.path().join("project.json");
+    let clip = write_project(&path, &fw_testmedia::count_24fps());
+
+    // Put Tint inside the clip's graph.
+    let (registry, problems) = fw_ops::registry(std::slice::from_ref(&plugins));
+    assert!(problems.is_empty(), "{problems:?}");
+    let mut editor = Editor::new(
+        fw_doc::save::load(&path, &registry).unwrap(),
+        Arc::new(registry),
+    );
+    let (input, output) = fw_doc::clip_graph_ids(clip);
+    let tint = SequentialIds::new(77).next_id();
+    let connect = |from, to| Command::Connect {
+        edge: fw_doc::Edge {
+            from: fw_doc::PortRef::new(from, "image"),
+            to: fw_doc::PortRef::new(to, "image"),
+        },
+    };
+    editor
+        .apply(
+            "Tint",
+            vec![
+                Command::AddNode {
+                    parent: clip,
+                    id: tint,
+                    type_id: "test.tint".into(),
+                    name: None,
+                    placement: None,
+                },
+                connect(input, tint),
+                connect(tint, output),
+            ],
+        )
+        .unwrap();
+    fw_doc::save::save(editor.doc(), &path).unwrap();
+
+    let settings = Settings {
+        editing_copies: false,
+        sound: false,
+        plugin_folders: vec![plugins.clone()],
+        ..Settings::default()
+    };
+    let mut engine = Engine::open(&path, Arc::new(Gpu::new().unwrap()), settings).unwrap();
+    for frame in 0..12 {
+        let time = Time::of_frame(frame, Time::from_seconds(24)).unwrap();
+        engine.request(Request::Seek { time }).unwrap();
+        assert!(engine.wait_for_frame(Duration::from_secs(20)));
+    }
+    assert_eq!(engine.failure(), None);
+    let cached = |e: &Engine| e.cached_frames().iter().map(|(a, b)| b - a).sum::<i64>();
+    assert!(until(&mut engine, 10, |e| cached(e) >= 12));
+
+    // Reading the same files again leaves every frame in the cache.
+    engine.request(Request::ReloadPlugins).unwrap();
+    assert!(
+        until(&mut engine, 10, |e| cached(e) >= 12),
+        "an unchanged shader keeps its frames: {:?}",
+        engine.cached_frames()
+    );
+
+    // A new shader renders anew.
+    write_tint(&plugins, "return vec4<f32>(c.rgb * amount * 0.5, c.a);");
+    let shown = engine.viewer_frame().unwrap().serial;
+    engine.request(Request::ReloadPlugins).unwrap();
+    assert!(
+        engine
+            .take_events()
+            .contains(&Event::PluginsReloaded { problems: vec![] })
+    );
+    assert!(until(&mut engine, 10, |e| cached(e) <= 1));
+    assert!(until(&mut engine, 20, |e| e
+        .viewer_frame()
+        .is_some_and(|f| f.serial > shown)));
+
+    // A broken one says why, and the frame says what failed.
+    write_tint(&plugins, "return nonsense;");
+    engine.request(Request::ReloadPlugins).unwrap();
+    let events = engine.take_events();
+    let Some(Event::PluginsReloaded { problems }) = events.last() else {
+        panic!("{events:?}");
+    };
+    assert!(problems[0].contains("nonsense"), "{problems:?}");
+    assert!(until(&mut engine, 20, |e| e.failure().is_some()));
+    assert!(
+        engine.failure().unwrap().contains("shader"),
+        "{:?}",
+        engine.failure()
+    );
+}

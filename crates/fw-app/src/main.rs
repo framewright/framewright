@@ -12,6 +12,7 @@ mod lists;
 mod node_editor;
 #[cfg(test)]
 mod node_tests;
+mod plugin_watch;
 mod style;
 #[cfg(test)]
 mod tests;
@@ -76,6 +77,8 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 3;
 #[derive(Debug)]
 enum UserEvent {
     AccessKit(egui_winit::accesskit_winit::Event),
+    /// A file in the plugin folders changed.
+    PluginsChanged,
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -121,6 +124,10 @@ impl ApplicationHandler<UserEvent> for Shell {
                 {
                     eprintln!("framewright: {e}");
                 }
+                let proxy = self.proxy.clone();
+                plugin_watch::watch(engine.plugin_folders().to_vec(), move || {
+                    let _ = proxy.send_event(UserEvent::PluginsChanged);
+                });
                 window.window.request_redraw();
                 self.engine = Some(engine);
                 self.running = Some(Running {
@@ -140,7 +147,18 @@ impl ApplicationHandler<UserEvent> for Shell {
         let Some(running) = self.running.as_mut() else {
             return;
         };
-        let UserEvent::AccessKit(event) = event;
+        let event = match event {
+            UserEvent::AccessKit(event) => event,
+            UserEvent::PluginsChanged => {
+                if let Some(engine) = self.engine.as_mut()
+                    && let Err(e) = engine.request(fw_engine::Request::ReloadPlugins)
+                {
+                    running.app.report(e.to_string());
+                }
+                running.window.window.request_redraw();
+                return;
+            }
+        };
         use egui_winit::accesskit_winit::WindowEvent as Access;
         let window = &mut running.window;
         match event.window_event {

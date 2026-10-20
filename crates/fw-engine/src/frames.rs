@@ -8,6 +8,7 @@ use fw_compile::Options;
 use fw_core::Time;
 use fw_doc::Document;
 use fw_playback::{DocumentFrames, FrameSource};
+use fw_plugin::Registry;
 use fw_render::GpuImage;
 
 /// Frames checked against the cache per idle moment of the render thread.
@@ -17,6 +18,8 @@ const CHECKS_PER_IDLE: usize = 256;
 /// render thread.
 pub(crate) struct Latest {
     pub doc: Document,
+    /// The node types to compile it with.
+    pub registry: Arc<Registry>,
     /// Bumped whenever what's cached may have changed: an edit, or frames
     /// leaving the cache.
     generation: u64,
@@ -26,9 +29,10 @@ pub(crate) struct Latest {
 }
 
 impl Latest {
-    pub fn new(doc: Document) -> Latest {
+    pub fn new(doc: Document, registry: Arc<Registry>) -> Latest {
         Latest {
             doc,
+            registry,
             generation: 0,
             cached: BTreeMap::new(),
         }
@@ -36,6 +40,12 @@ impl Latest {
 
     pub fn replace(&mut self, doc: Document) {
         self.doc = doc;
+        self.generation += 1;
+    }
+
+    /// New node types change what's rendered as much as an edit does.
+    pub fn replace_registry(&mut self, registry: Arc<Registry>) {
+        self.registry = registry;
         self.generation += 1;
     }
 
@@ -84,11 +94,16 @@ impl FrameSource for Edited {
 
     fn frame(&mut self, index: i64) -> Result<GpuImage, String> {
         // A cheap clone: the document is made of persistent maps.
-        let (doc, generation) = {
+        let (doc, registry, generation) = {
             let latest = self.lock();
-            (latest.doc.clone(), latest.generation)
+            (
+                latest.doc.clone(),
+                latest.registry.clone(),
+                latest.generation,
+            )
         };
         self.frames.doc = doc;
+        self.frames.registry = registry;
         let result = self.frames.frame(index);
         if result.is_ok() {
             self.lock().cached.insert(index, generation);
@@ -102,7 +117,7 @@ impl FrameSource for Edited {
         let evictions = self.frames.renderer.evictions();
         let evicted = evictions != self.evictions;
         self.evictions = evictions;
-        let (doc, generation, doubtful) = {
+        let (doc, registry, generation, doubtful) = {
             let mut latest = self.lock();
             if evicted {
                 latest.generation += 1;
@@ -115,8 +130,14 @@ impl FrameSource for Edited {
                 .map(|(i, _)| *i)
                 .take(CHECKS_PER_IDLE)
                 .collect();
-            (latest.doc.clone(), generation, doubtful)
+            (
+                latest.doc.clone(),
+                latest.registry.clone(),
+                generation,
+                doubtful,
+            )
         };
+        self.frames.registry = registry;
         if doubtful.is_empty() {
             return;
         }

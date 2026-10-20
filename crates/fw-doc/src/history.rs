@@ -68,6 +68,13 @@ impl Editor {
         &self.registry
     }
 
+    /// Swaps in new node types, such as reloaded plugins. The document and
+    /// history stay as they are: a node whose type changed is checked again
+    /// when it's next edited.
+    pub fn set_registry(&mut self, registry: Arc<Registry>) {
+        self.registry = registry;
+    }
+
     /// Increases by one with every change, including undo and redo.
     pub fn revision(&self) -> u64 {
         self.revision

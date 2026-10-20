@@ -64,6 +64,9 @@ pub enum Request {
     Pause,
     /// Writes the document to its file.
     Save,
+    /// Reads the plugin folders again and renders with what's there now, as
+    /// after an edit.
+    ReloadPlugins,
 }
 
 /// What the engine tells clients.
@@ -79,6 +82,10 @@ pub enum Event {
     Transport {
         playing: bool,
         time: Time,
+    },
+    /// The plugins were read again; `problems` says what was wrong with them.
+    PluginsReloaded {
+        problems: Vec<String>,
     },
 }
 
@@ -208,7 +215,7 @@ impl Engine {
         }
         let timeline = doc.timeline(doc.root()).map(|t| t.settings.clone());
         let rate = timeline.as_ref().map_or(Time::from_seconds(24), |t| t.rate);
-        let latest = Arc::new(Mutex::new(Latest::new(doc.clone())));
+        let latest = Arc::new(Mutex::new(Latest::new(doc.clone(), registry.clone())));
         let mut options = Options::at(Time::ZERO);
         options.quality = Quality::Draft;
         let renderer = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES)
@@ -303,6 +310,7 @@ impl Engine {
                     path: self.path.clone(),
                 });
             }
+            Request::ReloadPlugins => self.reload_plugins(),
         }
         Ok(())
     }
@@ -386,6 +394,11 @@ impl Engine {
 
     /// Runs of frames the frame cache holds for the current document, as
     /// `[start, end)` frame indices.
+    /// Where shader plugins are read from.
+    pub fn plugin_folders(&self) -> &[PathBuf] {
+        &self.settings.plugin_folders
+    }
+
     pub fn cached_frames(&self) -> Vec<(i64, i64)> {
         self.latest
             .lock()
@@ -460,6 +473,25 @@ impl Engine {
         }
         self.media = None;
         self.events.push(Event::Document(event));
+    }
+
+    // TODO: nodes that loaded as unknown because their plugin was missing stay
+    // unknown until the document is opened again.
+    fn reload_plugins(&mut self) {
+        let (registry, problems) = fw_ops::registry(&self.settings.plugin_folders);
+        let registry = Arc::new(registry);
+        self.editor.set_registry(registry.clone());
+        self.latest
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace_registry(registry);
+        self.player.invalidate();
+        if self.is_playing() {
+            self.sound_stale = Some(Instant::now());
+        }
+        let problems: Vec<String> = problems.iter().map(ToString::to_string).collect();
+        self.warnings.extend(problems.iter().cloned());
+        self.events.push(Event::PluginsReloaded { problems });
     }
 
     fn play(&mut self) {

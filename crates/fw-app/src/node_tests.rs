@@ -222,6 +222,12 @@ fn tab_opens_the_library_and_enter_adds_the_match() {
     harness.step();
     harness.key_press(egui::Key::Tab);
     harness.run_steps(2);
+    for shader_plugin in ["Add Saturation", "Add Invert", "Add Vignette", "Add Mix"] {
+        assert!(
+            harness.query_by_label(shader_plugin).is_some(),
+            "{shader_plugin} is listed"
+        );
+    }
     harness
         .get_by_role(egui::accesskit::Role::TextInput)
         .type_text("expo");
