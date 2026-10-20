@@ -33,10 +33,21 @@ pub struct ProjectMedia {
     copy_readers: Mutex<Vec<CopyReader>>,
     /// The engine's device, when video is decoded on it (design §12).
     hardware: Option<Arc<HardwareDevice>>,
+    policy: HardwarePolicy,
     /// Files whose hardware decoding failed: they decode in software.
     software_only: Mutex<std::collections::HashSet<PathBuf>>,
     /// Pictures decoded in hardware. For tests.
     hardware_frames: AtomicUsize,
+}
+
+/// When to decode in hardware, given a device that can.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardwarePolicy {
+    /// Whenever the hardware can decode the video.
+    Always,
+    /// When hardware decoding is faster for that kind of video, or close
+    /// (see [`crate::GPU_BIAS`]), measured the first time it's seen.
+    Fastest,
 }
 
 /// Copy chunk readers kept open, at most. Opening one costs about 4 ms.
@@ -79,15 +90,21 @@ impl ProjectMedia {
             copies: None,
             copy_readers: Mutex::new(Vec::new()),
             hardware: None,
+            policy: HardwarePolicy::Fastest,
             software_only: Mutex::new(Default::default()),
             hardware_frames: AtomicUsize::new(0),
         }
     }
 
-    /// Decodes video on the engine's GPU where it can, from now on. Meant to
-    /// be called once, after creating the GPU.
-    pub fn use_hardware(&mut self, device: fw_compile::VulkanVideoDevice) -> Result<(), String> {
+    /// Decodes video on the engine's GPU from now on, as `policy` says.
+    /// Meant to be called once, after creating the GPU.
+    pub fn use_hardware(
+        &mut self,
+        device: fw_compile::VulkanVideoDevice,
+        policy: HardwarePolicy,
+    ) -> Result<(), String> {
         self.hardware = Some(HardwareDevice::new(device)?);
+        self.policy = policy;
         self.readers
             .get_mut()
             .unwrap_or_else(|e| e.into_inner())
@@ -97,6 +114,11 @@ impl ProjectMedia {
             .unwrap_or_else(|e| e.into_inner())
             .clear();
         Ok(())
+    }
+
+    /// Which decoder each kind of video uses, as measured so far.
+    pub fn decoder_choices(&self) -> Vec<crate::DecoderChoice> {
+        self.hardware.as_ref().map_or(vec![], |h| h.choices())
     }
 
     /// How many pictures were decoded in hardware.
@@ -320,13 +342,20 @@ impl Decoder for ProjectMedia {
         if load.copy.is_some() {
             return self.decode_copy(load, &video, frame);
         }
-        let hardware = self.hardware.as_ref().filter(|_| {
-            !self
-                .software_only
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .contains(&load.path)
-        });
+        let hardware = self
+            .hardware
+            .as_ref()
+            .filter(|_| {
+                !self
+                    .software_only
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains(&load.path)
+            })
+            .filter(|device| match self.policy {
+                HardwarePolicy::Always => true,
+                HardwarePolicy::Fastest => device.choose(&load.path, &video),
+            });
         match self.decode_video(load, &video, frame, hardware) {
             Ok(decoded) => {
                 if matches!(decoded, Decoded::Hardware(_)) {

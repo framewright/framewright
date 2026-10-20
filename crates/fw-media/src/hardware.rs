@@ -26,8 +26,37 @@ pub struct HardwareDevice {
     /// layout, used in turn, each with a fence for its last use.
     ring: Mutex<Ring>,
     pool: vk::CommandPool,
+    /// Which decoder is faster for each kind of video, once measured.
+    choices: Mutex<Vec<DecoderChoice>>,
+    /// Held while measuring, so one kind of video is measured once.
+    measuring: Mutex<()>,
     /// Keeps the device alive as long as this does.
     _vulkan: VulkanVideoDevice,
+}
+
+/// Which decoder a kind of video uses, and how they compared.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecoderChoice {
+    /// The codec, profile, pixel format and size.
+    pub format: String,
+    pub hardware: bool,
+    /// Decoding the calibration frames, the best of two tries each.
+    pub hardware_time: std::time::Duration,
+    pub software_time: std::time::Duration,
+}
+
+/// Hardware decoding is chosen unless software is more than this much
+/// faster: it leaves the CPU free for everything else.
+pub const GPU_BIAS: f64 = 1.25;
+
+/// Frames decoded from the start of a file to compare the decoders: a
+/// keyframe and the frames after it, as a seek decodes.
+const CALIBRATION_FRAMES: u64 = 24;
+
+/// Whether hardware decoding taking `hardware` beats software taking
+/// `software`, with the bias towards the GPU.
+pub fn prefers_hardware(hardware: std::time::Duration, software: std::time::Duration) -> bool {
+    hardware.as_secs_f64() <= software.as_secs_f64() * GPU_BIAS
 }
 
 struct Ring {
@@ -142,8 +171,115 @@ impl HardwareDevice {
                 queue,
                 ring: Mutex::new(Ring { slots, next: 0 }),
                 pool,
+                choices: Mutex::new(Vec::new()),
+                measuring: Mutex::new(()),
                 _vulkan: vulkan,
             }))
+        }
+    }
+
+    /// Whether to decode `path` (already probed as `info`) in hardware: the
+    /// faster decoder for its kind of video, measured the first time.
+    pub(crate) fn choose(
+        self: &Arc<Self>,
+        path: &std::path::Path,
+        info: &crate::VideoInfo,
+    ) -> bool {
+        let format = format!("{} {}×{}", info.format, info.width, info.height);
+        let known = |choices: &Vec<DecoderChoice>| {
+            choices
+                .iter()
+                .find(|c| c.format == format)
+                .map(|c| c.hardware)
+        };
+        if let Some(hardware) = known(&self.choices.lock().unwrap_or_else(|e| e.into_inner())) {
+            return hardware;
+        }
+        let _measuring = self.measuring.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(hardware) = known(&self.choices.lock().unwrap_or_else(|e| e.into_inner())) {
+            return hardware;
+        }
+        let choice = self.measure(path, info, format);
+        let hardware = choice.hardware;
+        self.choices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(choice);
+        hardware
+    }
+
+    /// Times both decoders on the start of the file, twice each, keeping
+    /// the faster try. Hardware is timed until the GPU has finished.
+    fn measure(
+        self: &Arc<Self>,
+        path: &std::path::Path,
+        info: &crate::VideoInfo,
+        format: String,
+    ) -> DecoderChoice {
+        use crate::VideoReader;
+        use std::time::{Duration, Instant};
+        let times: Vec<_> = (0..info.frames.count().min(CALIBRATION_FRAMES))
+            .filter_map(|i| info.frames.time_of(i))
+            .collect();
+        let run = |reader: &mut VideoReader, hardware: bool| -> Option<Duration> {
+            let started = Instant::now();
+            for at in &times {
+                let decoded = reader.frame_decoded(*at).ok()?;
+                if hardware && !matches!(decoded, fw_compile::Decoded::Hardware(_)) {
+                    return None;
+                }
+            }
+            reader.wait_for_gpu().ok()?;
+            Some(started.elapsed())
+        };
+        let best = |reader: Option<VideoReader>, hardware: bool| {
+            let mut reader = reader?;
+            let first = run(&mut reader, hardware)?;
+            Some(first.min(run(&mut reader, hardware)?))
+        };
+        let software = best(VideoReader::open_probed(path, info).ok(), false);
+        let hardware = best(
+            VideoReader::open_hardware(path, info, self.clone()).ok(),
+            true,
+        );
+        let (hardware_time, software_time) = (
+            hardware.unwrap_or(Duration::MAX),
+            software.unwrap_or(Duration::MAX),
+        );
+        DecoderChoice {
+            format,
+            hardware: hardware.is_some() && prefers_hardware(hardware_time, software_time),
+            hardware_time,
+            software_time,
+        }
+    }
+
+    /// The choices made so far.
+    pub fn choices(&self) -> Vec<DecoderChoice> {
+        self.choices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Waits until `frame`, from a decoder on this device, is decoded.
+    pub(crate) fn wait_decoded(&self, frame: &rsmpeg::avutil::AVFrame) -> Result<(), String> {
+        // SAFETY: the frame's state is read under its lock.
+        unsafe {
+            let vkf = frame.data[0] as *mut ffvk::VkFrame;
+            let frames = (*frame.hw_frames_ctx).data as *mut ffi::AVHWFramesContext;
+            let fc = &*((*frames).hwctx as *const ffvk::FramesContext);
+            (fc.lock_frame.expect("FFmpeg sets it"))(frames, vkf);
+            let (semaphore, value) = ((*vkf).sem[0], (*vkf).sem_value[0]);
+            (fc.unlock_frame.expect("FFmpeg sets it"))(frames, vkf);
+            self.device
+                .wait_semaphores(
+                    &vk::SemaphoreWaitInfo::default()
+                        .semaphores(&[semaphore])
+                        .values(&[value]),
+                    u64::MAX,
+                )
+                .map_err(|e| e.to_string())
         }
     }
 
@@ -369,4 +505,24 @@ pub(crate) unsafe extern "C" fn pick_vulkan(
         }
     }
     software
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn hardware_wins_ties_and_near_ties() {
+        let ms = Duration::from_millis;
+        assert!(prefers_hardware(ms(50), ms(80)));
+        assert!(prefers_hardware(ms(100), ms(100)));
+        assert!(prefers_hardware(ms(120), ms(100)), "within the bias");
+        assert!(!prefers_hardware(ms(130), ms(100)));
+        assert!(
+            !prefers_hardware(ms(292), ms(150)),
+            "the Ryzen's integrated GPU"
+        );
+    }
 }

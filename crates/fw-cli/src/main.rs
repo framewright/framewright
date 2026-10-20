@@ -187,13 +187,21 @@ fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(
     Ok(())
 }
 
-/// Decodes video on the GPU when it can (design §12; `FW_HARDWARE_DECODE=0`
-/// turns it off).
+/// Decodes video on the GPU when that's faster (design §12).
+/// `FW_HARDWARE_DECODE=0` turns hardware decoding off; `1` uses it whenever
+/// it can.
 fn use_hardware(media: &mut ProjectMedia, gpu: &Arc<Gpu>) {
     if let Some(device) = gpu.video_device()
-        && let Err(e) = media.use_hardware(device)
+        && let Err(e) = media.use_hardware(device, hardware_policy())
     {
         eprintln!("fw: decoding in software: {e}");
+    }
+}
+
+fn hardware_policy() -> fw_media::HardwarePolicy {
+    match std::env::var("FW_HARDWARE_DECODE").as_deref() {
+        Ok("1") => fw_media::HardwarePolicy::Always,
+        _ => fw_media::HardwarePolicy::Fastest,
     }
 }
 

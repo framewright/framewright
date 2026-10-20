@@ -38,6 +38,9 @@ pub struct VideoInfo {
     pub keyframes: Vec<i64>,
     /// Seconds per timestamp tick.
     pub tick: Time,
+    /// The codec, profile and pixel format, e.g. `h264 High yuv420p`: what
+    /// decides how fast each decoder is.
+    pub format: String,
 }
 
 impl VideoInfo {
@@ -183,7 +186,31 @@ pub fn probe_video(path: &Path) -> Result<VideoInfo, MediaError> {
         first_pts: first,
         keyframes,
         tick,
+        format: format_name(&par),
     })
+}
+
+fn format_name(par: &rsmpeg::avcodec::AVCodecParameters) -> String {
+    let name = |p: *const std::ffi::c_char| {
+        (!p.is_null()).then(|| {
+            unsafe { std::ffi::CStr::from_ptr(p) }
+                .to_string_lossy()
+                .into_owned()
+        })
+    };
+    // SAFETY: FFmpeg returns static strings, or null for unknown values.
+    let (codec, profile, pixels) = unsafe {
+        (
+            name(ffi::avcodec_get_name(par.codec_id)),
+            name(ffi::avcodec_profile_name(par.codec_id, par.profile)),
+            name(ffi::av_get_pix_fmt_name(par.format)),
+        )
+    };
+    [codec, profile, pixels]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Whether frame `i` sits at `i / rate`, to within half a timestamp tick.
@@ -340,6 +367,17 @@ impl VideoReader {
             _ => self
                 .picture_held()
                 .map(|p| Decoded::Cpu(fw_core::DecodedImage::Planar(p))),
+        }
+    }
+
+    /// Waits until the GPU has finished decoding the frame held, if it was
+    /// decoded in hardware. Hardware decoding runs ahead of the CPU.
+    pub fn wait_for_gpu(&self) -> Result<(), MediaError> {
+        match (&self.hardware, &self.held) {
+            (Some(device), Some(frame)) if frame.format == ffi::AV_PIX_FMT_VULKAN => device
+                .wait_decoded(frame)
+                .map_err(|e| decode_error(&self.path)(e)),
+            _ => Ok(()),
         }
     }
 

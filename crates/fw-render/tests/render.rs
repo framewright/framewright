@@ -890,7 +890,9 @@ fn compare_hardware_decoding(video: &Path, layers: usize, frames: &[i64]) -> Opt
     let editor = video_timeline(video, layers);
     let software = ProjectMedia::new("/");
     let mut hardware = ProjectMedia::new("/");
-    hardware.use_hardware(device).unwrap();
+    hardware
+        .use_hardware(device, fw_media::HardwarePolicy::Always)
+        .unwrap();
     let mut on_cpu = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES);
     let mut on_gpu = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES);
     for &n in frames {
@@ -955,4 +957,47 @@ fn streams_the_hardware_cant_decode_fall_back_to_software() {
         assert!(decoded > 0);
         eprintln!("4:2:2: {in_hardware} of {decoded} pictures decoded in hardware");
     }
+}
+
+#[test]
+fn the_faster_decoder_is_chosen_for_each_kind_of_video() {
+    let gpu = gpu();
+    let Some(device) = gpu.video_device() else {
+        eprintln!("{} has no hardware decoding; skipped", gpu.describe());
+        return;
+    };
+    let video = fw_testmedia::h264();
+    let editor = video_timeline(&video, 1);
+    let mut media = ProjectMedia::new("/");
+    media
+        .use_hardware(device, fw_media::HardwarePolicy::Fastest)
+        .unwrap();
+    let mut renderer = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES);
+    for n in 0..5 {
+        let options = Options::at(Time::of_frame(n, Time::from_seconds(24)).unwrap());
+        let plan = compile(editor.doc(), editor.registry(), &media, &options).unwrap();
+        renderer.render(&plan, &media).unwrap();
+    }
+    // Measured once, on first use; the frames went the way it chose.
+    let choices = media.decoder_choices();
+    assert_eq!(choices.len(), 1, "{choices:?}");
+    let choice = &choices[0];
+    assert!(
+        choice.format.starts_with("h264 High yuv420p 320×180"),
+        "{choice:?}"
+    );
+    assert_eq!(
+        choice.hardware,
+        fw_media::prefers_hardware(choice.hardware_time, choice.software_time)
+    );
+    let in_hardware = media.hardware_frames() as u64;
+    assert_eq!(
+        in_hardware,
+        if choice.hardware {
+            renderer.stats().decodes
+        } else {
+            0
+        }
+    );
+    eprintln!("{choice:?}");
 }

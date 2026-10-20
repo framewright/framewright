@@ -23,7 +23,7 @@ clean test pattern used before decoded about five times faster.)
 ## Latest run
 
 2026-10-20, NVIDIA GeForce RTX 4070 (Vulkan, driver 595.91.07), Ryzen 5 7600X
-(6 cores, 12 threads), release build, with hardware decoding (the default).
+(6 cores, 12 threads), release build, with the default decoder choice, which on this GPU is hardware decoding.
 Three runs; the range is shown.
 
 | Workload | Measured | Limit | Result |
@@ -53,9 +53,13 @@ waits for the decoder chip (about 2.6 ms a frame at this bitrate) where
 software spreads the work over every core; both are far inside the budget,
 and hardware leaves the CPU free.
 
-On the Ryzen's integrated Radeon (RADV, hardware decoding): playback 10.2 ms,
-three layers 18.8 ms, scrubbing the original 291.9 ms (**missed**: its decoder
-is slower than the CPU), scrubbing the editing copy 7.9 ms.
+On the Ryzen's integrated Radeon (RADV) with hardware decoding forced
+(`FW_HARDWARE_DECODE=1`): playback 10.2 ms, three layers 18.8 ms, scrubbing
+the original 291.9 ms (**missed**: its decoder is slower than the CPU),
+scrubbing the editing copy 7.9 ms. By default the engine measures both
+decoders and there picks software: playback 4.7 ms, three layers 15.6 ms,
+scrubbing the original 170.8 ms (**missed**), against the 4070 machine's
+software 140–163 ms. The 4070 picks the GPU, as in the table above.
 
 On llvmpipe (software Vulkan, no decode queue, sharing the CPU with
 decoding), single-layer playback is 16.1 ms and the three-layer composite

@@ -159,14 +159,14 @@ impl Fixture {
         }
     }
 
-    /// Frames of `editor`, decoding in hardware when the GPU can
-    /// (`FW_HARDWARE_DECODE=0` measures software).
+    /// Frames of `editor`, decoding in hardware when that's faster
+    /// (`FW_HARDWARE_DECODE=0` measures software, `1` hardware).
     fn frames(&self, editor: &Editor) -> DocumentFrames {
         let gpu = Arc::new(Gpu::new().expect("a GPU"));
         let mut media = ProjectMedia::new(self.folder);
         if let Some(device) = gpu.video_device() {
             media
-                .use_hardware(device)
+                .use_hardware(device, hardware_policy())
                 .expect("hardware decoding starts");
         }
         DocumentFrames {
@@ -285,6 +285,33 @@ fn decode_next(f: &Fixture) -> Vec<Duration> {
         .collect()
 }
 
+fn hardware_policy() -> fw_media::HardwarePolicy {
+    match std::env::var("FW_HARDWARE_DECODE").as_deref() {
+        Ok("1") => fw_media::HardwarePolicy::Always,
+        _ => fw_media::HardwarePolicy::Fastest,
+    }
+}
+
+/// Which decoder each kind of video used, for the breakdowns.
+fn decoders(media: &ProjectMedia) -> String {
+    media
+        .decoder_choices()
+        .iter()
+        .map(|c| {
+            format!(
+                "; decoding {} (measured: GPU {:.0} ms, software {:.0} ms)",
+                if c.hardware {
+                    "on the GPU"
+                } else {
+                    "in software"
+                },
+                c.hardware_time.as_secs_f64() * 1e3,
+                c.software_time.as_secs_f64() * 1e3
+            )
+        })
+        .collect()
+}
+
 /// Renders a frame and waits for the GPU to finish it, which showing it
 /// would. Returns how long the wait was.
 fn render_frame(frames: &mut DocumentFrames, index: i64) -> Duration {
@@ -314,10 +341,11 @@ fn playback(f: &Fixture, editor: &Editor) -> Vec<Duration> {
     let after = frames.renderer.stats();
     let per = |d: Duration| format_ms(d / samples.len() as u32);
     eprintln!(
-        "  per frame: decode {}, upload {}, waiting for the GPU {}",
+        "  per frame: decode {}, upload {}, waiting for the GPU {}{}",
         per(after.decode_time - before.decode_time),
         per(after.upload_time - before.upload_time),
         per(gpu),
+        decoders(&frames.media),
     );
     samples
 }
@@ -336,7 +364,7 @@ fn scrub_copy(f: &Fixture) -> Vec<Duration> {
     if let Some(device) = frames.renderer.gpu().video_device() {
         frames
             .media
-            .use_hardware(device)
+            .use_hardware(device, hardware_policy())
             .expect("hardware decoding starts");
     }
     frames.options.quality = fw_plugin::Quality::Draft;
@@ -363,12 +391,13 @@ fn scrub_frames(mut frames: DocumentFrames) -> Vec<Duration> {
     let mut sorted = samples.clone();
     sorted.sort();
     eprintln!(
-        "  per frame: mean {}, median {}; decode {}, upload {}, waiting for the GPU {}",
+        "  per frame: mean {}, median {}; decode {}, upload {}, waiting for the GPU {}{}",
         per(samples.iter().sum()),
         format_ms(sorted[sorted.len() / 2]),
         per(after.decode_time - before.decode_time),
         per(after.upload_time - before.upload_time),
         per(gpu),
+        decoders(&frames.media),
     );
     samples
 }
