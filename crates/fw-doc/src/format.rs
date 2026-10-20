@@ -164,11 +164,7 @@ fn node_out(doc: &Document, id: NodeId) -> NodeOut<'_> {
             // A clip's graph is left out while it's still the one it started with.
             graph: n
                 .graph_contents()
-                .filter(|g| {
-                    !(starts_with_graph(&n.type_id)
-                        && g.positions.is_empty()
-                        && doc.keeps_starting_graph(id))
-                })
+                .filter(|_| !(starts_with_graph(&n.type_id) && doc.keeps_starting_graph(id)))
                 .map(|g| GraphOut {
                     nodes: g.nodes.iter().map(|c| (*c, node_out(doc, *c))).collect(),
                     edges: g.edges().collect(),

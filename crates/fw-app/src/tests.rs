@@ -351,7 +351,7 @@ fn compose_stays_open_through_undo_until_its_clip_goes() {
     harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
     harness.run_steps(3);
     assert!(harness.query_by_label("Node Input").is_some());
-    assert!(harness.state().1.document().keeps_starting_graph(clip));
+    assert!(harness.state().1.document().passes_media_through(clip));
 
     // The clip going away takes the page back to the timeline.
     let delete = fw_engine::Request::Edit {

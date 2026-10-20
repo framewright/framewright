@@ -384,7 +384,7 @@ fn clips(
         );
         let mut label_area = rect.shrink2(vec2(7.0, 4.0)).intersect(lanes);
         // A clip whose graph does more than pass its media through says so.
-        if !doc.keeps_starting_graph(node) && label_area.width() > 30.0 {
+        if !doc.passes_media_through(node) && label_area.width() > 30.0 {
             let badge = Rect::from_min_size(
                 pos2(label_area.right() - 12.0, rect.top() + 6.0),
                 vec2(12.0, 12.0),

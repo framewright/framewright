@@ -65,27 +65,39 @@ pub(crate) fn add_starting_graph(
 }
 
 impl Document {
-    /// Whether `clip`'s graph is still the Input → Output it started with,
-    /// leaving aside where its nodes sit in the node editor.
-    pub fn keeps_starting_graph(&self, clip: NodeId) -> bool {
-        let Some(graph) = self.graph(clip) else {
+    /// Whether `clip`'s graph only passes its media through: one Input
+    /// connected to one Output with its settings left alone.
+    pub fn passes_media_through(&self, clip: NodeId) -> bool {
+        self.passthrough_nodes(clip).is_some()
+    }
+
+    /// Whether `clip`'s graph is still exactly the one it started with, so
+    /// the file can leave it out.
+    pub(crate) fn keeps_starting_graph(&self, clip: NodeId) -> bool {
+        let Some([input, output]) = self.passthrough_nodes(clip) else {
             return false;
         };
-        let starting = starting_nodes(clip);
-        let nodes_kept = graph.nodes.len() == starting.len()
-            && starting.iter().all(|(id, type_id, name)| {
-                graph.nodes.contains(id)
-                    && self.node(*id).and_then(Node::as_known).is_some_and(|n| {
-                        n.type_id == *type_id
-                            && n.name == *name
-                            && n.params.is_empty()
-                            && n.contents.is_none()
-                    })
-            });
-        let (input, output) = clip_graph_ids(clip);
-        nodes_kept
-            && graph.inputs.len() == 1
+        let named = |id, name| self.node(id).is_some_and(|n| n.name() == name);
+        (input, output) == clip_graph_ids(clip)
+            && named(input, "Input")
+            && named(output, "Output")
+            && self.graph(clip).is_some_and(|g| g.positions.is_empty())
+    }
+
+    /// The Input and Output of a graph that only passes media through.
+    fn passthrough_nodes(&self, clip: NodeId) -> Option<[NodeId; 2]> {
+        let graph = self.graph(clip)?;
+        let of_type = |type_id: &str| {
+            graph.nodes.iter().copied().find(|id| {
+                self.node(*id).and_then(Node::as_known).is_some_and(|n| {
+                    n.type_id == type_id && n.params.is_empty() && n.contents.is_none()
+                })
+            })
+        };
+        let (input, output) = (of_type(INPUT_TYPE)?, of_type(OUTPUT_TYPE)?);
+        let connected = graph.inputs.len() == 1
             && graph.inputs.get(&PortRef::new(output, "image"))
-                == Some(&PortRef::new(input, "image"))
+                == Some(&PortRef::new(input, "image"));
+        (graph.nodes.len() == 2 && connected).then_some([input, output])
     }
 }

@@ -158,7 +158,7 @@ fn a_clip_starts_with_input_to_output_and_saves_it_only_once_changed() {
         doc.source_of(&PortRef::new(output, "image")),
         Some(&PortRef::new(input, "image"))
     );
-    assert!(doc.keeps_starting_graph(a));
+    assert!(doc.passes_media_through(a));
     let text = round_trip(&editor);
     assert!(!text.contains(&input.to_string()), "left out of the file");
 
@@ -168,12 +168,39 @@ fn a_clip_starts_with_input_to_output_and_saves_it_only_once_changed() {
         position: Some([10.0, 20.0]),
     };
     editor.apply("Move Node", vec![move_input]).unwrap();
-    assert!(editor.doc().keeps_starting_graph(a));
+    assert!(editor.doc().passes_media_through(a));
     assert!(round_trip(&editor).contains(&input.to_string()));
     editor.undo().unwrap();
 
-    // A node between them changes it.
+    // So does an Output with another id: it still only passes media through.
     let mut ids = SequentialIds::new(99);
+    let new_output = ids.next_id();
+    editor
+        .apply(
+            "Replace Output",
+            vec![
+                Command::RemoveNode { id: output },
+                Command::AddNode {
+                    parent: a,
+                    id: new_output,
+                    type_id: fw_plugin::OUTPUT_TYPE.into(),
+                    name: None,
+                    placement: None,
+                },
+                Command::Connect {
+                    edge: Edge {
+                        from: PortRef::new(input, "image"),
+                        to: PortRef::new(new_output, "image"),
+                    },
+                },
+            ],
+        )
+        .unwrap();
+    assert!(editor.doc().passes_media_through(a));
+    assert!(round_trip(&editor).contains(&new_output.to_string()));
+    editor.undo().unwrap();
+
+    // A node between them changes it.
     let gain = ids.next_id();
     let connect = |from, to| Command::Connect {
         edge: Edge {
@@ -194,7 +221,7 @@ fn a_clip_starts_with_input_to_output_and_saves_it_only_once_changed() {
             vec![add_gain, connect(input, gain), connect(gain, output)],
         )
         .unwrap();
-    assert!(!editor.doc().keeps_starting_graph(a));
+    assert!(!editor.doc().passes_media_through(a));
     assert!(round_trip(&editor).contains(&gain.to_string()));
 
     // Deleting the clip takes its graph; undo brings both back.
@@ -227,7 +254,7 @@ fn undoing_a_new_clip_takes_its_graph_too() {
     editor.undo().unwrap();
     assert_eq!(editor.doc(), &before);
     editor.redo().unwrap();
-    assert!(editor.doc().keeps_starting_graph(c));
+    assert!(editor.doc().passes_media_through(c));
 }
 
 #[test]
