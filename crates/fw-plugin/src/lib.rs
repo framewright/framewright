@@ -7,6 +7,7 @@
 pub mod audio;
 pub mod desc;
 pub mod image;
+pub mod kernel;
 pub mod registry;
 pub mod value;
 

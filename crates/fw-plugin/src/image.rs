@@ -101,7 +101,9 @@ pub struct PixelOp {
     pub label: String,
     /// A WGSL function body. `c` is the premultiplied input `vec4<f32>`,
     /// `e0`, `e1`, … are the extra inputs' pixels, `prm(base, i)` reads
-    /// parameter `i`, and it must return a `vec4<f32>`.
+    /// parameter `i`, `pos` is the pixel's centre in canvas units and `frame`
+    /// the image's region (`min.xy, max.xy`). It must return a `vec4<f32>`.
+    /// See [`crate::kernel`] for the shader it goes into.
     pub wgsl: String,
     pub params: Vec<f32>,
 }

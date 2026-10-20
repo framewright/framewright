@@ -178,16 +178,21 @@ pub struct KernelStep {
     /// Images some ops read besides the main input, bound in this order.
     pub extra_inputs: Vec<ImageHandle>,
     pub ops: Vec<KernelOp>,
+    /// The region the pass's pixels cover, in canvas units, which ops see as
+    /// `frame`.
+    pub frame: Rect,
     /// The generated compute shader. Parameters come from a storage buffer
-    /// holding every op's `params`, concatenated in order.
+    /// holding the frame, then every op's `params`, concatenated in order.
     pub wgsl: String,
 }
 
 impl KernelStep {
     pub fn params(&self) -> Vec<f32> {
-        self.ops
-            .iter()
-            .flat_map(|op| op.params.iter().copied())
+        let f = &self.frame;
+        [f.min.x, f.min.y, f.max.x, f.max.y]
+            .into_iter()
+            .map(|v| v as f32)
+            .chain(self.ops.iter().flat_map(|op| op.params.iter().copied()))
             .collect()
     }
 }

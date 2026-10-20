@@ -738,10 +738,7 @@ impl Renderer {
         output: &wgpu::Texture,
     ) {
         let device = &self.gpu.device;
-        let mut params = kernel.params();
-        if params.is_empty() {
-            params.push(0.0); // storage bindings can't be empty
-        }
+        let params = kernel.params();
         let bytes: Vec<u8> = params.iter().flat_map(|p| p.to_le_bytes()).collect();
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("fw-params"),

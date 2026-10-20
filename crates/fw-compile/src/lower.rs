@@ -655,6 +655,7 @@ impl Lowering<'_> {
                                 input,
                                 extra_inputs: vec![],
                                 ops: vec![],
+                                frame: op.info.region,
                                 wgsl: String::new(),
                             }));
                             steps.len() - 1

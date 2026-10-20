@@ -1036,3 +1036,95 @@ fn the_faster_decoder_is_chosen_for_each_kind_of_video() {
     );
     eprintln!("{choice:?}");
 }
+
+/// Writes each pixel's `pos` relative to `frame`, so the mapping from pixels
+/// to canvas units can be read back.
+struct Position;
+
+impl fw_plugin::ImageBehaviour for Position {
+    fn input_space(&self, _: &fw_plugin::ResolvedParams, _: usize) -> fw_plugin::SpaceNeed {
+        // The delivery space, so nothing converts what it writes.
+        fw_plugin::SpaceNeed::Exact(ColorSpace::LINEAR_REC709)
+    }
+
+    fn emit(
+        &self,
+        _params: &fw_plugin::ResolvedParams,
+        _request: &fw_plugin::Request,
+        inputs: &[fw_plugin::ImageHandle],
+        plan: &mut dyn fw_plugin::PlanBuilder,
+    ) -> Result<fw_plugin::ImageHandle, fw_plugin::NodeError> {
+        let op = fw_plugin::PixelOp {
+            label: "position".into(),
+            wgsl: "return vec4<f32>((pos - frame.xy) / (frame.zw - frame.xy), frame.x, 1.0);"
+                .into(),
+            params: vec![],
+        };
+        Ok(plan.per_pixel(inputs[0], op))
+    }
+}
+
+#[test]
+fn operations_see_each_pixels_centre_in_canvas_units() {
+    let mut s = scene();
+    let mut registry = fw_ops::builtin_registry();
+    let desc = s.editor.registry().desc("fw.exposure").unwrap().clone();
+    let desc = fw_plugin::NodeTypeDesc {
+        id: "test.position".into(),
+        name: "Position".into(),
+        params: vec![],
+        ..desc
+    };
+    registry
+        .register(fw_plugin::NodeType::new(desc).with_image(Position, "position"))
+        .unwrap();
+    let mut editor = Editor::new(s.editor.doc().clone(), Arc::new(registry));
+    let position = SequentialIds::new(50).next_id();
+    let root = editor.doc().root();
+    editor
+        .apply(
+            "Position",
+            vec![
+                Command::AddNode {
+                    parent: root,
+                    id: position,
+                    type_id: "test.position".into(),
+                    name: None,
+                    placement: None,
+                },
+                Command::Connect {
+                    edge: Edge {
+                        from: PortRef::new(s.read, "image"),
+                        to: PortRef::new(position, "image"),
+                    },
+                },
+                Command::Connect {
+                    edge: Edge {
+                        from: PortRef::new(position, "image"),
+                        to: PortRef::new(s.output, "image"),
+                    },
+                },
+            ],
+        )
+        .unwrap();
+    s.editor = editor;
+    let got = Renderer::new(gpu(), DEFAULT_CACHE_BYTES)
+        .render(&plan(&s), &s.media)
+        .unwrap();
+    for (x, y) in [
+        (0, 0),
+        (W - 1, 0),
+        (0, H - 1),
+        (W / 2, H / 2),
+        (W - 1, H - 1),
+    ] {
+        let [u, v, left, _] = got.pixel(x, y);
+        let want = [(x as f32 + 0.5) / W as f32, (y as f32 + 0.5) / H as f32];
+        assert!(
+            (u - want[0]).abs() < 1e-3 && (v - want[1]).abs() < 1e-3,
+            "pixel ({x}, {y}) saw {:?}, not {want:?}",
+            [u, v]
+        );
+        assert_eq!(left, 0.0, "the frame starts at the canvas origin");
+    }
+}
