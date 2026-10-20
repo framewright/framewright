@@ -369,3 +369,34 @@ fn compose_stays_open_through_undo_until_its_clip_goes() {
         "back on the Edit page, where undo brings the clip back"
     );
 }
+
+#[test]
+fn a_fixed_plugin_takes_its_problem_away() {
+    let Project { _dir, engine, .. } = project();
+    let mut harness = harness(engine);
+    harness.run_steps(2);
+    let problem = "plugins/tint: its shader doesn't work: shader.wgsl:2:14: oops".to_owned();
+    harness
+        .state_mut()
+        .0
+        .plugins_reloaded(std::slice::from_ref(&problem));
+    harness.run_steps(2);
+    assert!(
+        harness
+            .query_by_label_contains("shader.wgsl:2:14")
+            .is_some()
+    );
+
+    harness.state_mut().0.plugins_reloaded(&[]);
+    harness.run_steps(2);
+    assert!(harness.query_by_label_contains("shader.wgsl").is_none());
+
+    // Other messages are left alone.
+    harness
+        .state_mut()
+        .0
+        .report("Select a clip to open it in Compose".into());
+    harness.state_mut().0.plugins_reloaded(&[]);
+    harness.run_steps(2);
+    assert!(harness.query_by_label_contains("Select a clip").is_some());
+}

@@ -129,6 +129,8 @@ pub struct App {
     pub maximised: bool,
     /// The last thing that went wrong, shown in the workspace bar.
     message: Option<String>,
+    /// The plugin problem being shown, so a reload that fixes it clears it.
+    plugin_problem: Option<String>,
     gpu_name: String,
     /// The node the inspector shows. UI state: selecting isn't an edit.
     selected: Option<NodeId>,
@@ -161,6 +163,7 @@ impl App {
             actions: vec![],
             maximised: false,
             message: None,
+            plugin_problem: None,
             gpu_name: engine.gpu().info.name.clone(),
             selected: None,
             gestures: Gestures::default(),
@@ -174,6 +177,21 @@ impl App {
     /// Shows `message` in the workspace bar, as the last thing to report.
     pub fn report(&mut self, message: String) {
         self.message = Some(message);
+    }
+
+    /// Shows what was wrong with the plugins just read, or takes away the
+    /// last plugin problem shown when there's nothing wrong any more.
+    pub fn plugins_reloaded(&mut self, problems: &[String]) {
+        if self.message.is_some() && self.message == self.plugin_problem {
+            self.message = None;
+        }
+        self.plugin_problem = problems.first().map(|first| match problems.len() {
+            1 => first.clone(),
+            n => format!("{first} (and {} more)", n - 1),
+        });
+        if let Some(problem) = &self.plugin_problem {
+            self.message = Some(problem.clone());
+        }
     }
 
     pub fn select(&mut self, node: Option<NodeId>) {

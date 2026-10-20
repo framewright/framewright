@@ -489,8 +489,7 @@ impl Engine {
         if self.is_playing() {
             self.sound_stale = Some(Instant::now());
         }
-        let problems: Vec<String> = problems.iter().map(ToString::to_string).collect();
-        self.warnings.extend(problems.iter().cloned());
+        let problems = problems.iter().map(ToString::to_string).collect();
         self.events.push(Event::PluginsReloaded { problems });
     }
 

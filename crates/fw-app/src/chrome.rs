@@ -363,13 +363,17 @@ pub fn workspace_bar(
     let r = ui.max_rect();
     let painter = ui.painter();
     painter.hline(r.x_range(), r.top() + 0.5, Stroke::new(1.0, t::LINE));
-    painter.text(
+    let status = painter.text(
         pos2(r.left() + 14.0, r.center().y),
         Align2::LEFT_CENTER,
         left,
         sans(11.0),
         t::TEXT3,
     );
+    // Painted, but screen readers should still hear what it says.
+    ui.interact(status, ui.scope_id().with("status"), egui::Sense::hover())
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, left));
+    let painter = ui.painter();
     painter.text(
         pos2(r.right() - 14.0, r.center().y),
         Align2::RIGHT_CENTER,

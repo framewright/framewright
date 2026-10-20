@@ -261,8 +261,15 @@ impl Shell {
                 serial: frame.serial,
             });
         }
-        // TODO: react to events once panels cache what they show.
-        engine.take_events();
+        // TODO: react to the other events once panels cache what they show.
+        for event in engine.take_events() {
+            if let fw_engine::Event::PluginsReloaded { problems } = event {
+                for problem in &problems {
+                    eprintln!("framewright: {problem}");
+                }
+                running.app.plugins_reloaded(&problems);
+            }
+        }
         for warning in engine.take_warnings() {
             eprintln!("framewright: {warning}");
             running.app.report(warning);
