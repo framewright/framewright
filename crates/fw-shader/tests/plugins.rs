@@ -68,9 +68,13 @@ fn a_broken_shader_still_registers_and_says_where_it_went_wrong() {
     assert!(problem.starts_with("shader.wgsl:2:"), "{problem}");
     assert!(problem.contains("nonsense"), "{problem}");
 
-    // Type errors are caught too, not just names.
-    let wrong_type = plugin(TINT, "return c.rgb;\n", "shader.wgsl").unwrap();
-    assert!(wrong_type.problem.is_some());
+    // Type errors are caught too, not just names, and read as WGSL types.
+    let wrong_type = plugin(TINT, "let a = c.rgb;\nreturn a * colour;\n", "shader.wgsl").unwrap();
+    let problem = wrong_type.problem.expect("vec3 times vec4");
+    assert_eq!(
+        problem,
+        "shader.wgsl:2:8: Operation Multiply can't work with vec3<f32> and vec4<f32>"
+    );
 }
 
 #[test]

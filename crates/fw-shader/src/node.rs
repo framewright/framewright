@@ -98,16 +98,83 @@ pub(crate) fn validate(desc: &NodeTypeDesc, shader: &str, file: &str) -> Result<
     )
     .validate(&module)
     .map_err(|e| {
+        // The innermost cause says what's wrong; the outer ones only say
+        // which function and expression it was in.
         let mut message = e.as_inner().to_string();
         let mut cause = std::error::Error::source(e.as_inner());
         while let Some(c) = cause {
-            message.push_str(": ");
-            message.push_str(&c.to_string());
+            message = c.to_string();
             cause = c.source();
         }
-        format!("{}{message}", place(e.location(&source)))
+        // Several spans are attached, from the function down; the one inside
+        // the shader body is the place to point at.
+        let location = e
+            .spans()
+            .map(|(span, _)| span.location(&source))
+            .find(|l| place(Some(*l)).starts_with(file))
+            .or_else(|| e.location(&source));
+        format!("{}{}", place(location), readable_types(&message))
     })?;
     Ok(())
+}
+
+/// naga's messages with its type dumps (`Vector { size: Tri, scalar: Scalar
+/// { kind: Float, width: 4 } }`) written as WGSL types (`vec3<f32>`), and
+/// the expression numbers they refer to by (`[15] (of type …)`) taken out.
+fn readable_types(message: &str) -> String {
+    let scalars = [
+        ("Scalar { kind: Float, width: 4 }", "f32"),
+        ("Scalar { kind: Float, width: 2 }", "f16"),
+        ("Scalar { kind: Sint, width: 4 }", "i32"),
+        ("Scalar { kind: Uint, width: 4 }", "u32"),
+        ("Scalar { kind: Bool, width: 1 }", "bool"),
+        ("Scalar { kind: AbstractFloat, width: 8 }", "a float"),
+        ("Scalar { kind: AbstractInt, width: 8 }", "an integer"),
+    ];
+    let sizes = [("Bi", 2), ("Tri", 3), ("Quad", 4)];
+    let mut out = message.to_owned();
+    for (debug, name) in scalars {
+        out = out.replace(debug, name);
+    }
+    for (_, scalar) in scalars {
+        for (size, n) in sizes {
+            out = out.replace(
+                &format!("Vector {{ size: {size}, scalar: {scalar} }}"),
+                &format!("vec{n}<{scalar}>"),
+            );
+            for (rows, m) in sizes {
+                out = out.replace(
+                    &format!("Matrix {{ columns: {size}, rows: {rows}, scalar: {scalar} }}"),
+                    &format!("mat{n}x{m}<{scalar}>"),
+                );
+            }
+        }
+        out = out.replace(&format!("Scalar({scalar})"), scalar);
+    }
+    // "[15] (of type vec3<f32>)" becomes "vec3<f32>".
+    let mut readable = String::new();
+    let mut rest = out.as_str();
+    while let Some(start) = rest.find('[') {
+        let after = &rest[start + 1..];
+        let digits = after.chars().take_while(char::is_ascii_digit).count();
+        let tail = &after[digits..];
+        match tail
+            .strip_prefix("] (of type ")
+            .and_then(|t| t.find(')').map(|end| (t, end)))
+        {
+            Some((t, end)) if digits > 0 => {
+                readable.push_str(&rest[..start]);
+                readable.push_str(&t[..end]);
+                rest = &t[end + 1..];
+            }
+            _ => {
+                readable.push_str(&rest[..=start]);
+                rest = after;
+            }
+        }
+    }
+    readable.push_str(rest);
+    readable
 }
 
 /// Adds a shader node's body to plans, or reports why it can't.
