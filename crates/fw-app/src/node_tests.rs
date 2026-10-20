@@ -282,3 +282,47 @@ fn delete_removes_the_selected_nodes() {
     undo(&mut harness);
     assert_eq!(source_of(&harness.state().1, output), Some(exposure));
 }
+
+#[test]
+fn tab_with_a_node_selected_changes_nothing_but_the_library() {
+    let Project {
+        _dir,
+        exposure,
+        engine,
+        ..
+    } = project();
+    let mut harness = harness(engine);
+    harness.run_steps(2);
+    harness.get_by_label("Node Exposure").click();
+    harness.run_steps(2);
+    let below = centre(&harness, "Node Exposure") + vec2(0.0, 150.0);
+    harness.hover_at(below);
+    harness.step();
+    harness.key_press(egui::Key::Tab);
+    harness.run_steps(2);
+    assert!(
+        harness.query_by_label("Add Exposure").is_some(),
+        "the library opened"
+    );
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    let engine = &harness.state().1;
+    assert_eq!(
+        engine.undo_label(),
+        None,
+        "focus passing through the inspector edited nothing"
+    );
+    let doc = engine.document();
+    assert!(
+        doc.node(exposure)
+            .unwrap()
+            .as_known()
+            .unwrap()
+            .params
+            .is_empty()
+    );
+    assert!(
+        harness.query_by_label("Add Exposure").is_none(),
+        "Escape closed the library"
+    );
+}

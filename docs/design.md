@@ -241,7 +241,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Proposed]** (step 4 plan) **The node editor, on the Compose page.** It shows the graph of the container being edited: the root of a graph document, or a clip opened in Compose.
   - Nodes are boxes with typed ports, inputs on the left and outputs on the right. Connections are curves. The canvas pans and zooms.
   - Dragging from a port to a port connects them (`Command::Connect`, replacing the input's source). Dragging a connection off its input disconnects it. A drop the document would refuse (a loop, or different kinds of data) is shown as refused while dragging, with the reason.
-  - Clicking selects a node for the inspector. Delete removes it. Dragging moves the selected nodes, one undo step per drag.
+  - Clicking selects a node for the inspector, and Shift-click adds a node to the selection or takes it out. Delete removes the selected nodes. Dragging moves them, one undo step per drag.
   - Nodes are added from a searchable list of the registry's types grouped by category, opened with Tab or a right-click. The new node lands where the list was opened.
 - **[Proposed]** (step 4 plan) **Node positions are saved in the document.** They live in the Graph's contents (`"positions": {"<node id>": [x, y]}`, in editor units) and change through `Command::SetPosition`, so moving nodes is undoable and travels with the file. A node with no saved position is placed by the editor (in columns by depth) until it is moved. The compiler never reads positions, so moving a node changes no cache key.
 
