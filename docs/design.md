@@ -244,6 +244,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Clicking selects a node for the inspector, and Shift-click adds a node to the selection or takes it out. Delete removes the selected nodes. Dragging moves them, one undo step per drag.
   - Nodes are added from a searchable list of the registry's types grouped by category, opened with Tab or a right-click. The new node lands where the list was opened.
 - **[Proposed]** (step 4 plan) **Node positions are saved in the document.** They live in the Graph's contents (`"positions": {"<node id>": [x, y]}`, in editor units) and change through `Command::SetPosition`, so moving nodes is undoable and travels with the file. A node with no saved position is placed by the editor (in columns by depth) until it is moved. The compiler never reads positions, so moving a node changes no cache key.
+- **[Proposed]** (step 4, built) **The inspector edits every numeric kind a plugin can declare:** numbers with sliders, whole numbers, checkboxes, choices, vec2 as an x and a y field, and colours with a picker. One drag or one visit to a field is one undo step. TODO: a colour picker in the Studio style that keeps values above 1.0 and shows which colour space they're in (egui's picker reads them as linear, which is what plugin colour defaults are).
 
 ### 10.1 Process model
 
@@ -266,16 +267,16 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Audio: CLAP hosting (§8).
 - **[Decided]** "Recipe" plugins that compile parameters into ordinary graphs, so plugin code never runs per frame. This idea comes from the old prototype.
 - **[Decided]** Node dispatch goes through a registry. Adding a node type touches one place (the old prototype needed 8 to 9 files).
-- **[Proposed]** (step 4 plan) **Shader nodes.** A shader plugin is a folder holding `plugin.toml` and a WGSL file. The manifest gives the id, version, name, category, image inputs (one called `image` by default), parameters (float, int, bool, choice, vec2, colour, with ranges, units and sections) and whether the node varies with time. The WGSL is the body of a per-pixel function, the same as a built-in `PixelOp`:
-  - It sees `c` (the first input's premultiplied pixel), the other inputs by their port ids, and each parameter by its id. Colours arrive in the working space, and a choice arrives as its index.
-  - It also sees `pos`, the pixel's centre in canvas units, and `frame`, the input's region. The fused kernel needs this.
+- **[Proposed]** (step 4, built) **Shader nodes** (`fw-shader`). A shader plugin is a folder holding `plugin.toml` and a WGSL file (`shader.wgsl` unless the manifest's `shader` names another). The manifest gives the id, version, name, category, image inputs (one called `image` by default; at least one), parameters (`float`, `int`, `bool`, `choice`, `vec2`, `colour`, with `unit`, `range` for sliders, `limits`, `section`, `animatable` and a choice's `options`) and whether the node varies with time. The WGSL is the body of a per-pixel function, the same as a built-in `PixelOp`:
+  - It sees `c` (the first input's premultiplied pixel), the other inputs by their port ids, and each parameter by its id. Colours arrive unpremultiplied in the space the node works in (the working space), and a choice arrives as the index of the option picked.
+  - It also sees `pos`, the pixel's centre in canvas units, and `frame`, the image's region as `min.xy, max.xy`. Every fused kernel now passes both to every operation; the region leads each kernel's parameter buffer.
   - It returns a `vec4<f32>`, which is fused with the operations around it like any per-pixel operation.
-  - The host checks the manifest and validates the generated function with naga against the real kernel prelude when it loads. A broken plugin still registers, so documents using it keep their nodes, but rendering it gives an error that shows the shader error.
+  - The kernel's text (prelude, colour helpers, generator) moved from `fw-compile` into `fw-plugin` (`fw_plugin::kernel`), since the per-pixel contract is node API. The host checks the manifest, refuses ids that clash with names the kernel uses (`c`, `pos`, `frame`, `base`, `prm`, `e0`…, `fw_*`, `op_*`, …) or with WGSL words, and validates the generated function with naga inside the real kernel when it loads. Errors point at the shader file's line and column. A plugin whose manifest parses but whose shader doesn't validate still registers, so documents using it keep their nodes, and rendering it gives an error that shows the shader error. A manifest that can't be read is reported and skipped.
   - The manifest and shader text form the implementation hash, so editing a shader misses the cache with no explicit invalidation.
-  - TODO: helper functions outside the body (they need renaming so fused kernels don't clash), operations that read neighbouring pixels (blurs) with their margins, and a time seed for noise.
-- **[Proposed]** (step 4 plan) **Where plugins come from.** Plugins are read from the built-in set embedded in the binary, then `$XDG_DATA_HOME/framewright/plugins`, then each folder in `FW_PLUGIN_PATH`. A plugin that reuses an id already loaded is reported and skipped. One constructor builds this registry, so the app, `fw render` and `fw play` agree.
-- **[Proposed]** (step 4 plan) **Built-ins on the shader host.** `fw.exposure` moves onto it, with the same id, version and parameter, and new built-ins (Saturation, Invert, Vignette, Mix) are written as shader plugins. This proves the API is complete for per-pixel nodes.
-- **[Proposed]** (step 4 plan) **Reloading plugins.** `Request::ReloadPlugins` builds a fresh registry and swaps it into the editor and renderer. It then follows the same path as an edit: frames rendered ahead are dropped, and cached frames are checked again. The app watches the plugin folders and sends the request when a file changes, so a saved shader shows at once. TODO: when a reload changes a node's parameters, existing nodes keep their stored values and are checked again on the next edit; version migrations for plugins come later.
+  - TODO: helper functions outside the body (they need renaming so fused kernels don't clash), operations that read neighbouring pixels (blurs) with their margins, generators with no input, and a time seed for noise.
+- **[Proposed]** (step 4, built) **Where plugins come from.** The built-in shader plugins are embedded in the binary (`crates/fw-ops/plugins/`). Then each plugin folder under `$XDG_DATA_HOME/framewright/plugins` (or `~/.local/share/…`) is read, then those under each folder in `FW_PLUGIN_PATH`; a folder that is itself a plugin counts as one. A plugin that reuses an id already loaded is reported and skipped. One constructor (`fw_ops::registry`) builds this registry, so the app, `fw render` and `fw play` agree. The folders come in through the engine's `Settings::plugin_folders`, which is empty by default, so tests see only the built-ins. Problems show in the workspace bar and on stderr.
+- **[Proposed]** (step 4, built) **Built-ins on the shader host.** `fw.exposure` moved onto it with the same id, version and parameter, and renders the same pixels (the golden image still matches). New built-ins written as shader plugins: Saturation (towards ACEScg luminance), Invert (one minus each channel in linear light, as Nuke does), Vignette (amount, size, softness and centre) and Mix (A to B by an amount). `fw example` shows Exposure, Saturation and Vignette. This proves the API is complete for per-pixel nodes.
+- **[Proposed]** (step 4, built) **Reloading plugins.** `Request::ReloadPlugins` builds a fresh registry and swaps it into the editor and the render thread. It then follows the same path as an edit: frames rendered ahead are dropped, and cached frames are checked again, so frames of plugins that didn't change stay cached. The engine reports `Event::PluginsReloaded` with any problems. The app looks at the plugin folders' files every half second and sends the request when one changes, so a saved shader shows at once. TODO: inotify instead of looking; when a reload changes a node's parameters, existing nodes keep their stored values and are checked again on the next edit; nodes that loaded as unknown because their plugin was missing stay unknown until the document is opened again; version migrations for plugins come later.
 
 ### Scripting
 
@@ -358,7 +359,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 ```
 fw-core      ids, rational time, math, colour-space descriptors, hashing (no GPU, no I/O)
 fw-plugin    the node contract: node type descriptions, parameter schemas, registry
-fw-shader    the shader-node plugin host: manifests and WGSL to node types (Proposed, step 4)
+fw-shader    the shader-node plugin host: manifests and WGSL to node types (step 4)
 fw-doc       document model, containers, commands, undo, serialisation, migrations
 fw-compile   authoring tree → flat evaluation graph(s): video and audio schedules
 fw-render    GPU executor, resource pool, content-hashed cache, scheduling
@@ -383,7 +384,7 @@ fw-bench     benchmark harness and performance budgets
 1. Core types, document, serialisation, and a three-node graph (image → exposure → output) rendered headlessly to EXR, colour-managed, with golden-image tests.
 2. Time: a video source and the Timeline container, compiled to the flat graph, plus audio playback with A/V sync.
 3. The UI shell in the Studio style (after the toolkit bake-off): viewer, parameter editing, undo, frame cache.
-4. Shader-node plugins, to prove early that built-ins use the plugin API. In progress, paired with the node editor and Open in Compose (step 4 plan, Proposed).
+4. Shader-node plugins, to prove early that built-ins use the plugin API. Built, with the node editor and Open in Compose (step 4 plan, Proposed).
 5. Then widen: LayerStack and Photo documents, masks, text, mixer, 3D.
 
 **[Decided]** (from the hardware decoding discussion) Before step 3: editing copies and hardware decoding, so scrubbing feels right from the first UI build.

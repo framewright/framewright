@@ -388,7 +388,7 @@ fn example(folder: &Path) -> Result<(), String> {
 
     let mut ids = RandomIds::default();
     let root = ids.next_id();
-    let [read, exposure, output] = [(); 3].map(|_| ids.next_id());
+    let [read, exposure, saturation, vignette, output] = [(); 5].map(|_| ids.next_id());
     let mut editor = Editor::new(Document::new(root), Arc::new(fw_ops::builtin_registry()));
     let add = |id, type_id: &str| Command::AddNode {
         parent: root,
@@ -414,6 +414,8 @@ fn example(folder: &Path) -> Result<(), String> {
             vec![
                 add(read, "fw.read_image"),
                 add(exposure, "fw.exposure"),
+                add(saturation, "fw.saturation"),
+                add(vignette, "fw.vignette"),
                 add(output, "fw.output"),
                 set(
                     read,
@@ -422,9 +424,14 @@ fn example(folder: &Path) -> Result<(), String> {
                         path: "gradient.png".into(),
                     }),
                 ),
-                set(exposure, "exposure", ParamValue::Float(1.0)),
+                set(exposure, "exposure", ParamValue::Float(0.5)),
+                set(saturation, "saturation", ParamValue::Float(130.0)),
+                set(vignette, "amount", ParamValue::Float(90.0)),
+                set(vignette, "size", ParamValue::Float(70.0)),
                 connect(read, exposure),
-                connect(exposure, output),
+                connect(exposure, saturation),
+                connect(saturation, vignette),
+                connect(vignette, output),
             ],
         )
         .map_err(|e| e.to_string())?;
