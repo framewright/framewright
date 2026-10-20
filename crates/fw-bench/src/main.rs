@@ -159,12 +159,21 @@ impl Fixture {
         }
     }
 
+    /// Frames of `editor`, decoding in hardware when the GPU can
+    /// (`FW_HARDWARE_DECODE=0` measures software).
     fn frames(&self, editor: &Editor) -> DocumentFrames {
+        let gpu = Arc::new(Gpu::new().expect("a GPU"));
+        let mut media = ProjectMedia::new(self.folder);
+        if let Some(device) = gpu.video_device() {
+            media
+                .use_hardware(device)
+                .expect("hardware decoding starts");
+        }
         DocumentFrames {
             doc: editor.doc().clone(),
             registry: editor.registry().clone(),
-            media: ProjectMedia::new(self.folder),
-            renderer: Renderer::new(Arc::new(Gpu::new().expect("a GPU")), DEFAULT_CACHE_BYTES),
+            media,
+            renderer: Renderer::new(gpu, DEFAULT_CACHE_BYTES),
             rate: self.rate,
             options: Options::at(Time::ZERO),
         }
@@ -324,6 +333,12 @@ fn scrub_copy(f: &Fixture) -> Vec<Duration> {
         fw_testmedia::hd_h264().with_file_name("copies"),
         fw_media::PRORES_PROXY_1080,
     );
+    if let Some(device) = frames.renderer.gpu().video_device() {
+        frames
+            .media
+            .use_hardware(device)
+            .expect("hardware decoding starts");
+    }
     frames.options.quality = fw_plugin::Quality::Draft;
     // Making the copy is setup, not timed; later runs find it on disk.
     render_frame(&mut frames, 0);

@@ -6,6 +6,8 @@ version.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The same ash as wgpu-hal, for the raw Vulkan work hardware decoding needs.
+ash = "0.38"
 fw-compile.workspace = true
 fw-core.workspace = true
 fw-plugin.workspace = true
@@ -16,6 +18,7 @@ thiserror.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
+naga.workspace = true
 fw-doc.workspace = true
 fw-media.workspace = true
 fw-ops.workspace = true

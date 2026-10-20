@@ -140,7 +140,7 @@ fn compile(project: &Path, time: Time, out: Option<&Path>) -> Result<(Plan, Proj
 
 fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(), String> {
     let format = output_format(out)?;
-    let (plan, media) = compile(project, time, Some(out))?;
+    let (plan, mut media) = compile(project, time, Some(out))?;
     if format == Format::Exr && plan.output_space.transfer != Transfer::Linear {
         return Err(format!(
             "the Output node delivers {}, which EXR can't hold; choose a linear space",
@@ -149,6 +149,7 @@ fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(
     }
     let started = Instant::now();
     let gpu = Arc::new(Gpu::new().map_err(|e| e.to_string())?);
+    use_hardware(&mut media, &gpu);
     let setup = started.elapsed();
     let mut renderer = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES);
     let image: Arc<RgbaImage> = renderer.render(&plan, &media).map_err(|e| e.to_string())?;
@@ -184,6 +185,16 @@ fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(
         written.as_millis()
     );
     Ok(())
+}
+
+/// Decodes video on the GPU when it can (design §12; `FW_HARDWARE_DECODE=0`
+/// turns it off).
+fn use_hardware(media: &mut ProjectMedia, gpu: &Arc<Gpu>) {
+    if let Some(device) = gpu.video_device()
+        && let Err(e) = media.use_hardware(device)
+    {
+        eprintln!("fw: decoding in software: {e}");
+    }
 }
 
 /// Media access for a project, making and using editing copies when `copies`.
@@ -299,10 +310,12 @@ fn play(
     );
     let mut options = Options::at(from);
     options.quality = fw_plugin::Quality::Draft;
+    let mut media = project_media(folder, !no_copies);
+    use_hardware(&mut media, &gpu);
     let frames = DocumentFrames {
         doc,
         registry,
-        media: project_media(folder, !no_copies),
+        media,
         renderer: Renderer::new(gpu, DEFAULT_CACHE_BYTES),
         rate,
         options,

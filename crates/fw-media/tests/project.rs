@@ -45,7 +45,7 @@ fn probes_are_cached_until_the_file_changes() {
         node: None,
         copy: None,
     };
-    let image = media.decode(&plan_frame).unwrap().to_rgba();
+    let image = media.decode(&plan_frame).unwrap().to_rgba().unwrap();
     assert_eq!(
         (image.pixel(5, 5)[0] * 255.0).round() as u8,
         fw_testmedia::level(2)
@@ -82,7 +82,11 @@ fn two_clips_of_one_file_each_get_their_frames() {
     // Two clips playing side by side from different places in the file.
     for n in 0..12 {
         for (node, start) in [(0, 0), (1, 30)] {
-            let image = media.decode(&load(node, start + n)).unwrap().to_rgba();
+            let image = media
+                .decode(&load(node, start + n))
+                .unwrap()
+                .to_rgba()
+                .unwrap();
             assert_eq!(
                 (image.pixel(5, 5)[0] * 255.0).round() as u8,
                 fw_testmedia::level((start + n) as u64),

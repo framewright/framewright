@@ -6,7 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fw_compile::FrameTimes;
+use std::sync::Arc;
+
+use fw_compile::{Decoded, FrameTimes, HardwarePicture};
 use fw_core::color::Primaries;
 use fw_core::planar::{PlanarEncoding, PlanarModel, Plane, Siting, YuvMatrix, YuvRange};
 use fw_core::{ColorSpace, PlanarImage, Time, Transfer};
@@ -18,6 +20,7 @@ use rsmpeg::ffi;
 use rsmpeg::swscale::SwsContext;
 
 use crate::MediaError;
+use crate::hardware::{HardwareDevice, VulkanFrame};
 
 /// What a video file holds, learned without decoding any frames.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,11 +75,16 @@ pub(crate) fn open_input(path: &Path) -> Result<(AVFormatContextInput, usize), M
 /// streams (every frame decodes alone) only slices, because each frame
 /// thread delays the first frame after a seek: about 10 ms against under 1
 /// for a ProRes Proxy frame.
+///
+/// With `hardware`, FFmpeg's Vulkan decoder runs on that device where it can
+/// (one thread: more only delay the first frame after a seek), falling back
+/// to software for streams it can't decode.
 pub(crate) fn open_decoder(
     path: &Path,
     par: &rsmpeg::avcodec::AVCodecParameters,
     threads: Option<usize>,
     intra: bool,
+    hardware: Option<&HardwareDevice>,
 ) -> Result<AVCodecContext, MediaError> {
     let err = decode_error(path);
     let codec = rsmpeg::avcodec::AVCodec::find_decoder(par.codec_id)
@@ -85,6 +93,15 @@ pub(crate) fn open_decoder(
     decoder
         .apply_codecpar(par)
         .map_err(|e| err(e.to_string()))?;
+    let threads = if hardware.is_some() { Some(1) } else { threads };
+    if let Some(device) = hardware {
+        // SAFETY: the decoder takes its own reference to the context.
+        unsafe {
+            let c = decoder.as_mut_ptr();
+            (*c).hw_device_ctx = ffi::av_buffer_ref(device.context().as_ptr());
+            (*c).get_format = Some(crate::hardware::pick_vulkan);
+        }
+    }
     let count = threads.map_or("auto".to_owned(), |n| n.to_string());
     let count = std::ffi::CString::new(count).expect("no NUL in a number");
     let mut options = rsmpeg::avutil::AVDictionary::new(c"threads", &count, 0);
@@ -235,6 +252,8 @@ pub struct VideoReader {
     /// The demuxer has run out and the decoder has been told to drain.
     draining: bool,
     scaler: Option<(i32, SwsContext)>,
+    /// The device a hardware decoder runs on, if this reader has one.
+    hardware: Option<Arc<HardwareDevice>>,
 }
 
 /// Without keyframe timestamps, decoding forward this far (in seconds) is
@@ -252,16 +271,31 @@ impl VideoReader {
 
     /// Opens a file already probed, without reading it again.
     pub fn open_probed(path: &Path, info: &VideoInfo) -> Result<VideoReader, MediaError> {
-        VideoReader::open_with(path, info, false)
+        VideoReader::open_with(path, info, false, None)
     }
 
     /// Opens an intra-frame file already probed (such as an editing copy),
     /// decoding for the quickest single frames rather than throughput.
     pub fn open_intra(path: &Path, info: &VideoInfo) -> Result<VideoReader, MediaError> {
-        VideoReader::open_with(path, info, true)
+        VideoReader::open_with(path, info, true, None)
     }
 
-    fn open_with(path: &Path, info: &VideoInfo, intra: bool) -> Result<VideoReader, MediaError> {
+    /// Opens a file already probed, decoding on `device` where it can. Read
+    /// it with [`VideoReader::frame_decoded`].
+    pub fn open_hardware(
+        path: &Path,
+        info: &VideoInfo,
+        device: Arc<HardwareDevice>,
+    ) -> Result<VideoReader, MediaError> {
+        VideoReader::open_with(path, info, false, Some(device))
+    }
+
+    fn open_with(
+        path: &Path,
+        info: &VideoInfo,
+        intra: bool,
+        hardware: Option<Arc<HardwareDevice>>,
+    ) -> Result<VideoReader, MediaError> {
         let err = decode_error(path);
         let first_pts = info.first_pts;
         let (input, stream) = open_input(path)?;
@@ -269,7 +303,7 @@ impl VideoReader {
             let s = &input.streams()[stream];
             (s.codecpar().clone(), s.time_base)
         };
-        let decoder = open_decoder(path, &par, None, intra)?;
+        let decoder = open_decoder(path, &par, None, intra, hardware.as_deref())?;
         Ok(VideoReader {
             path: path.to_owned(),
             input,
@@ -282,6 +316,7 @@ impl VideoReader {
             held: None,
             draining: false,
             scaler: None,
+            hardware,
         })
     }
 
@@ -289,11 +324,32 @@ impl VideoReader {
     /// as decoded planes; [`PlanarImage::to_rgba`] makes straight-alpha RGBA
     /// in the stream's own encoding.
     pub fn frame(&mut self, at: Time) -> Result<PlanarImage, MediaError> {
+        self.reach(at)?;
+        self.picture_held()
+    }
+
+    /// The frame starting at source time `at`: planes, or a hardware
+    /// decoder's image on the GPU.
+    pub fn frame_decoded(&mut self, at: Time) -> Result<Decoded, MediaError> {
+        self.reach(at)?;
+        let frame = self.held.as_ref().expect("a frame is held");
+        match &self.hardware {
+            Some(device) if frame.format == ffi::AV_PIX_FMT_VULKAN => {
+                hardware_picture(&self.path, frame, device.clone()).map(Decoded::Hardware)
+            }
+            _ => self
+                .picture_held()
+                .map(|p| Decoded::Cpu(fw_core::DecodedImage::Planar(p))),
+        }
+    }
+
+    /// Decodes until the frame starting at `at` is held.
+    fn reach(&mut self, at: Time) -> Result<(), MediaError> {
         let err = decode_error(&self.path);
         let target = self.target(at)?;
         let current = self.held.as_ref().map(|f| f.best_effort_timestamp);
         if current == Some(target) {
-            return self.picture_held();
+            return Ok(());
         }
         if self.must_seek(target) {
             self.seek(target)?;
@@ -302,14 +358,14 @@ impl VideoReader {
             let Some(frame) = self.next_frame()? else {
                 // Past the end: the last frame holds.
                 return match self.held {
-                    Some(_) => self.picture_held(),
+                    Some(_) => Ok(()),
                     None => Err(err("no frame decoded".into())),
                 };
             };
             let pts = frame.best_effort_timestamp;
             self.held = Some(frame);
             if pts >= target {
-                return self.picture_held();
+                return Ok(());
             }
         }
     }
@@ -413,6 +469,9 @@ impl VideoReader {
         let err = decode_error(&self.path);
         let frame = self.held.as_ref().expect("a frame is held");
         let (w, h, format) = (frame.width, frame.height, frame.format);
+        if format == ffi::AV_PIX_FMT_VULKAN {
+            return Err(err("decoded on the GPU; read it with frame_decoded".into()));
+        }
         if let Some(layout) = native_layout(format) {
             let encoding = encoding_of(frame, &layout, 0);
             let bytes = encoding.bytes_per_sample() as usize;
@@ -517,6 +576,41 @@ impl VideoReader {
                 .collect(),
         })
     }
+}
+
+/// A hardware decoder's frame as a picture the renderer reads in place:
+/// NV12, or P010 (10 bits in the top of 16).
+fn hardware_picture(
+    path: &Path,
+    frame: &AVFrame,
+    device: Arc<HardwareDevice>,
+) -> Result<HardwarePicture, MediaError> {
+    let err = decode_error(path);
+    // SAFETY: a hardware frame always has its frames context.
+    let frames = unsafe { &*((*frame.hw_frames_ctx).data as *const ffi::AVHWFramesContext) };
+    let (bits, shift) = match frames.sw_format {
+        ffi::AV_PIX_FMT_NV12 => (8, 0),
+        ffi::AV_PIX_FMT_P010LE => (10, 6),
+        other => {
+            return Err(err(format!(
+                "hardware decoding gave pixel format {other}, which isn't read on the GPU"
+            )));
+        }
+    };
+    let layout = NativeLayout {
+        planes: vec![0, 1, 2],
+        rgb: false,
+        bits,
+        chroma_shift: (1, 1),
+        full_range_format: false,
+    };
+    Ok(HardwarePicture {
+        width: frame.width as u32,
+        height: frame.height as u32,
+        coded: (frames.width as u32, frames.height as u32),
+        encoding: encoding_of(frame, &layout, shift),
+        frame: Arc::new(VulkanFrame::new(frame, device)),
+    })
 }
 
 /// A pixel format the GPU can take as it is: one plane per component, codes

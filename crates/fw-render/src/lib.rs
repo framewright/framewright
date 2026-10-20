@@ -4,8 +4,9 @@
 //! space the plan says. Plan outputs and decoded files are kept in a RAM
 //! cache by content key, so unchanged work is never redone.
 //!
-//! Decoded video arrives as planes of integer codes and is converted on the
-//! GPU, so the CPU never touches its pixels.
+//! Decoded video arrives as planes of integer codes, or as a hardware
+//! decoder's image already on the GPU, and is converted on the GPU, so the
+//! CPU never touches its pixels.
 
 mod cache;
 mod gpu;
@@ -14,13 +15,17 @@ mod unpack;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fw_compile::{Decoder, FillStep, KernelStep, LoadStep, Plan, Step};
+use ash::vk;
+use fw_compile::{
+    Acquired, Decoded, Decoder, FillStep, HardwareFrame, HardwarePicture, KernelStep, LoadStep,
+    Plan, Step,
+};
 use fw_core::{ColorSpace, ContentHash, DecodedImage, PlanarImage, RgbaImage};
 use fw_plugin::ImageHandle;
 use half::f16;
 use half::slice::HalfFloatSliceExt;
 
-pub use cache::{Cached, RamCache};
+pub use cache::{Cached, DEFAULT_GPU_CACHE_BYTES, RamCache};
 pub use gpu::Gpu;
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -73,6 +78,12 @@ pub struct Renderer {
     /// to the pool only after the submit: uploads run at the start of the
     /// next submit, so reusing one within a plan would overwrite it.
     uploading: Vec<wgpu::Texture>,
+    /// Hardware pictures acquired for the plan being recorded, released by
+    /// its submit or abandoned if it fails. Each is acquired at most once a
+    /// plan: twice would make its two waits depend on each other.
+    acquired: Vec<(Arc<dyn HardwareFrame>, Acquired)>,
+    /// Textures wrapping those pictures' images, by frame. Never pooled.
+    wrapped: HashMap<usize, wgpu::Texture>,
     stats: Stats,
 }
 
@@ -83,6 +94,9 @@ enum LayoutKind {
     Kernel(usize),
     /// Unpacking this many planes. Binding 0: the output. 1…: the planes.
     Planar(usize),
+    /// Converting a hardware decoder's image. Binding 0: the output.
+    /// 1: luma. 2: interleaved chroma.
+    TwoPlane,
     /// Binding 0: the output.
     Fill,
 }
@@ -141,6 +155,7 @@ impl KernelLayout {
                 );
                 entries
             }
+            LayoutKind::TwoPlane => vec![output(0), texture(1, float), texture(2, float)],
             LayoutKind::Fill => vec![output(0)],
         };
         let bind_group = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -171,6 +186,8 @@ impl Renderer {
             pipelines: HashMap::new(),
             pool: HashMap::new(),
             uploading: Vec::new(),
+            acquired: Vec::new(),
+            wrapped: HashMap::new(),
             stats: Stats::default(),
         }
     }
@@ -206,6 +223,7 @@ impl Renderer {
         self.stats.readback_time += started.elapsed();
         self.submitted();
         if let Some(error) = pollster::block_on(scope.pop()) {
+            self.flush_rejected();
             return Err(RenderError::Gpu(error.to_string()));
         }
         self.recycle(output);
@@ -227,11 +245,12 @@ impl Renderer {
             .device
             .push_error_scope(wgpu::ErrorFilter::Validation);
         let (encoder, texture) = self.encode(plan, decoder)?;
-        self.gpu.queue.submit([encoder.finish()]);
+        self.submit(encoder);
         self.submitted();
         // Lets wgpu free the frame's finished buffers and bind groups.
         let _ = self.gpu.device.poll(wgpu::PollType::Poll);
         if let Some(error) = pollster::block_on(scope.pop()) {
+            self.flush_rejected();
             return Err(RenderError::Gpu(error.to_string()));
         }
         Ok(GpuImage {
@@ -249,6 +268,19 @@ impl Renderer {
     ) -> Result<(wgpu::CommandEncoder, wgpu::Texture), RenderError> {
         // Left over from a plan that failed before its submit.
         self.submitted();
+        self.abandon();
+        let result = self.record(plan, decoder);
+        if result.is_err() {
+            self.abandon();
+        }
+        result
+    }
+
+    fn record(
+        &mut self,
+        plan: &Plan,
+        decoder: &dyn Decoder,
+    ) -> Result<(wgpu::CommandEncoder, wgpu::Texture), RenderError> {
         let mut textures: HashMap<ImageHandle, wgpu::Texture> = HashMap::new();
         let mut encoder = self
             .gpu
@@ -278,6 +310,49 @@ impl Renderer {
             self.recycle(texture);
         }
         Ok((encoder, output))
+    }
+
+    /// Submits a plan's work. Hardware pictures it read are waited for, and
+    /// their decoders told when reading is done, by semaphores staged under
+    /// the submit lock so no other submit can take them.
+    fn submit(&mut self, encoder: wgpu::CommandEncoder) {
+        let gpu = self.gpu.clone();
+        let _submits = gpu.lock_submits();
+        if !self.acquired.is_empty() {
+            // SAFETY: only staging semaphores for the next submit.
+            let queue = unsafe { gpu.queue.as_hal::<wgpu::hal::api::Vulkan>() }
+                .expect("hardware pictures only exist on Vulkan");
+            for (_, a) in &self.acquired {
+                let semaphore = vk::Handle::from_raw(a.semaphore);
+                queue.add_wait_semaphore(
+                    semaphore,
+                    Some(a.wait),
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                );
+                queue.add_signal_semaphore(semaphore, Some(a.signal));
+            }
+        }
+        gpu.queue.submit([encoder.finish()]);
+        self.acquired.clear();
+        // wgpu destroys them once the GPU is done, returning the frames.
+        self.wrapped.clear();
+    }
+
+    /// After wgpu rejects a submit, the semaphore waits and signals staged
+    /// for it are still pending. An empty submit carries them, so no decoder
+    /// waits forever for a signal.
+    fn flush_rejected(&self) {
+        let _submits = self.gpu.lock_submits();
+        self.gpu.queue.submit([]);
+    }
+
+    /// Lets the decoders of pictures acquired for a plan that won't be
+    /// submitted go on.
+    fn abandon(&mut self) {
+        for (frame, acquired) in self.acquired.drain(..) {
+            frame.abandon(&acquired);
+        }
+        self.wrapped.clear();
     }
 
     /// Returns textures held for uploads to the pool, once their plan is submitted.
@@ -364,7 +439,7 @@ impl Renderer {
                 let (width, height) = decoded.size();
                 // An editing copy may be smaller; it's scaled up on the GPU.
                 let smaller_copy = load.copy.is_some()
-                    && matches!(decoded, DecodedImage::Planar(_))
+                    && matches!(decoded, Decoded::Cpu(DecodedImage::Planar(_)))
                     && width <= load.width
                     && height <= load.height;
                 if (width, height) != (load.width, load.height) && !smaller_copy {
@@ -373,7 +448,7 @@ impl Renderer {
                         load.width, load.height
                     )));
                 }
-                if let DecodedImage::Rgba(image) = &mut decoded {
+                if let Decoded::Cpu(DecodedImage::Rgba(image)) = &mut decoded {
                     image.premultiply();
                 }
                 let decoded = Arc::new(decoded);
@@ -383,10 +458,18 @@ impl Renderer {
             }
         };
         let started = std::time::Instant::now();
+        let size = (load.width, load.height);
         let texture = match &*decoded {
-            DecodedImage::Rgba(image) => self.upload_rgba(image),
-            DecodedImage::Planar(picture) => {
-                self.upload_planar(encoder, picture, (load.width, load.height))
+            Decoded::Cpu(DecodedImage::Rgba(image)) => self.upload_rgba(image),
+            Decoded::Cpu(DecodedImage::Planar(picture)) => {
+                self.upload_planar(encoder, picture, size)
+            }
+            Decoded::Hardware(picture) => {
+                self.upload_hardware(encoder, picture, size)
+                    .map_err(|message| RenderError::Decode {
+                        path: load.path.display().to_string(),
+                        message,
+                    })?
             }
         };
         self.stats.upload_time += started.elapsed();
@@ -471,12 +554,144 @@ impl Renderer {
         self.run(
             encoder,
             LayoutKind::Planar(planes.len()),
-            &unpack::planar(&picture.encoding, scale),
+            &unpack::planar(&picture.encoding, scale, &unpack::Source::Planes),
             &entries,
             size,
         );
         self.uploading.extend(planes);
         output
+    }
+
+    /// Converts a hardware decoder's image where it lies. The image is
+    /// acquired (once per plan) and wrapped as a texture until the submit.
+    fn upload_hardware(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        picture: &HardwarePicture,
+        size: (u32, u32),
+    ) -> Result<wgpu::Texture, String> {
+        let wide = picture.encoding.bytes_per_sample() == 2;
+        let (format, luma_format, chroma_format, max) = if wide {
+            (
+                wgpu::TextureFormat::P010,
+                wgpu::TextureFormat::R16Unorm,
+                wgpu::TextureFormat::Rg16Unorm,
+                65535.0,
+            )
+        } else {
+            (
+                wgpu::TextureFormat::NV12,
+                wgpu::TextureFormat::R8Unorm,
+                wgpu::TextureFormat::Rg8Unorm,
+                255.0,
+            )
+        };
+        let id = Arc::as_ptr(&picture.frame) as *const () as usize;
+        if !self.wrapped.contains_key(&id) {
+            let acquired = picture.frame.acquire()?;
+            self.acquired.push((picture.frame.clone(), acquired));
+            let texture = self.wrap(picture, acquired.image, format);
+            self.wrapped.insert(id, texture);
+        }
+        let image = &self.wrapped[&id];
+        let plane = |format, aspect| {
+            image.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(format),
+                aspect,
+                ..Default::default()
+            })
+        };
+        let luma = plane(luma_format, wgpu::TextureAspect::Plane0);
+        let chroma = plane(chroma_format, wgpu::TextureAspect::Plane1);
+        let output = self.texture(size.0, size.1, FORMAT);
+        let output_view = output.create_view(&Default::default());
+        let (w, h) = (picture.width, picture.height);
+        let scale = (size != (w, h)).then(|| [w as f32 / size.0 as f32, h as f32 / size.1 as f32]);
+        let source = unpack::Source::TwoPlane {
+            max,
+            luma_last: (w - 1, h - 1),
+            chroma_last: (w.div_ceil(2) - 1, h.div_ceil(2) - 1),
+        };
+        let entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&output_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&luma),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&chroma),
+            },
+        ];
+        self.run(
+            encoder,
+            LayoutKind::TwoPlane,
+            &unpack::planar(&picture.encoding, scale, &source),
+            &entries,
+            size,
+        );
+        Ok(output)
+    }
+
+    /// A texture over a hardware picture's image, which keeps the frame
+    /// alive until wgpu has finished with it. The image is in the layout
+    /// `acquire` left it in, which wgpu is told.
+    fn wrap(
+        &self,
+        picture: &HardwarePicture,
+        image: u64,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::Texture {
+        let size = wgpu::Extent3d {
+            width: picture.coded.0,
+            height: picture.coded.1,
+            depth_or_array_layers: 1,
+        };
+        let frame = picture.frame.clone();
+        // SAFETY: the image is the frame's, `size` and `format` describe it,
+        // and the frame (so the image) lives until the drop callback.
+        unsafe {
+            let hal = self
+                .gpu
+                .device
+                .as_hal::<wgpu::hal::api::Vulkan>()
+                .expect("hardware pictures only exist on Vulkan")
+                .texture_from_raw(
+                    vk::Handle::from_raw(image),
+                    &wgpu::hal::TextureDescriptor {
+                        label: Some("fw-hardware-picture"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUses::RESOURCE,
+                        memory_flags: wgpu::hal::MemoryFlags::empty(),
+                        view_formats: vec![],
+                    },
+                    Some(Box::new(move || drop(frame))),
+                    wgpu::hal::vulkan::TextureMemory::External,
+                );
+            self.gpu
+                .device
+                .create_texture_from_hal::<wgpu::hal::api::Vulkan>(
+                    hal,
+                    &wgpu::TextureDescriptor {
+                        label: Some("fw-hardware-picture"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    },
+                    wgpu::TextureUses::RESOURCE,
+                )
+        }
     }
 
     fn dispatch(
@@ -586,7 +801,11 @@ impl Renderer {
 
     /// Copies a texture back to the CPU. Rows in the staging buffer are padded
     /// to wgpu's 256-byte alignment.
-    fn read_back(&self, mut encoder: wgpu::CommandEncoder, texture: &wgpu::Texture) -> RgbaImage {
+    fn read_back(
+        &mut self,
+        mut encoder: wgpu::CommandEncoder,
+        texture: &wgpu::Texture,
+    ) -> RgbaImage {
         let (width, height) = (texture.width(), texture.height());
         let row = width * 8;
         let padded =
@@ -609,7 +828,7 @@ impl Renderer {
             },
             texture.size(),
         );
-        self.gpu.queue.submit([encoder.finish()]);
+        self.submit(encoder);
         buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         self.gpu.wait();
         let mut image = RgbaImage::new(width, height, true);

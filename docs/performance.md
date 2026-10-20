@@ -23,22 +23,44 @@ clean test pattern used before decoded about five times faster.)
 ## Latest run
 
 2026-10-20, NVIDIA GeForce RTX 4070 (Vulkan, driver 595.91.07), Ryzen 5 7600X
-(6 cores, 12 threads), release build. Three runs; the range is shown.
+(6 cores, 12 threads), release build, with hardware decoding (the default).
+Three runs; the range is shown.
 
 | Workload | Measured | Limit | Result |
 | --- | --- | --- | --- |
-| `probe-cached` | 0.001 ms | 0.050 ms | ok |
-| `compile-frame` | 0.004–0.005 ms | 1.000 ms | ok |
-| `decode-next-1080p` | 7.3–7.4 ms | 20.0 ms | ok |
-| `playback-frame-1080p` | 3.7–5.1 ms | 41.7 ms | ok |
-| `playback-composite-1080p` | 6.8–9.5 ms | 41.7 ms | ok |
-| `scrub-1080p` | 143.6–163.1 ms | 150.0 ms | **at the limit**: missed in two runs of three |
-| `scrub-1080p-copy` | 4.4–4.8 ms | 50.0 ms | ok |
-| `audio-block-8-voices` | 0.010–0.011 ms | 0.500 ms | ok |
+| `probe-cached` | 0.001–0.002 ms | 0.050 ms | ok |
+| `compile-frame` | 0.004–0.007 ms | 1.000 ms | ok |
+| `decode-next-1080p` | 5.6–12.9 ms | 20.0 ms | ok (software; the reader alone) |
+| `playback-frame-1080p` | 7.0–7.5 ms | 41.7 ms | ok |
+| `playback-composite-1080p` | 10.3–12.2 ms | 41.7 ms | ok |
+| `scrub-1080p` | 129.9–130.5 ms | 150.0 ms | ok |
+| `scrub-1080p-copy` | 4.5–6.5 ms | 50.0 ms | ok |
+| `audio-block-8-voices` | 0.007–0.012 ms | 0.500 ms | ok |
 
-On llvmpipe (software Vulkan, sharing the CPU with decoding), single-layer
-playback is 16.1 ms and the three-layer composite 50.3 ms, over budget;
-scrubbing from the editing copy is 16.4 ms. Budgets are set for a real GPU.
+### Hardware against software decoding
+
+The same build with `FW_HARDWARE_DECODE=0`, one run each, with the CPU time
+the whole workload took (wall time includes setup):
+
+| Workload | Hardware | CPU | Software | CPU |
+| --- | --- | --- | --- | --- |
+| `playback-frame-1080p` | 7.5 ms | 0.6 s | 2.7 ms | 2.7 s |
+| `playback-composite-1080p` | 12.2 ms | 0.9 s | 7.6 ms | 7.0 s |
+| `scrub-1080p` | 133.4 ms | 1.0 s | 139.6 ms | 23.0 s |
+
+Earlier software runs of `scrub-1080p` ranged 144–163 ms. Hardware playback
+waits for the decoder chip (about 2.6 ms a frame at this bitrate) where
+software spreads the work over every core; both are far inside the budget,
+and hardware leaves the CPU free.
+
+On the Ryzen's integrated Radeon (RADV, hardware decoding): playback 10.2 ms,
+three layers 18.8 ms, scrubbing the original 291.9 ms (**missed**: its decoder
+is slower than the CPU), scrubbing the editing copy 7.9 ms.
+
+On llvmpipe (software Vulkan, no decode queue, sharing the CPU with
+decoding), single-layer playback is 16.1 ms and the three-layer composite
+50.3 ms, over budget; scrubbing from the editing copy is 16.4 ms. Budgets are
+set for a real GPU.
 
 ### Before and after the optimisation pass
 

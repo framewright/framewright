@@ -9,6 +9,8 @@
 
 mod audio;
 mod copies;
+mod ffvk;
+mod hardware;
 mod project;
 mod video;
 
@@ -17,6 +19,7 @@ pub use audio::{AudioReader, CHANNELS, has_audio};
 pub use video::{VideoInfo, VideoReader, probe_video};
 
 pub use copies::{CopyProfile, EditingCopies, PRORES_PROXY_1080, write_copy};
+pub use hardware::HardwareDevice;
 pub use project::ProjectMedia;
 
 use std::fs::{self, File};

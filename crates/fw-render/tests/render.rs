@@ -811,3 +811,148 @@ fn draft_frames_come_from_editing_copies() {
     }
     assert_eq!(renderer.stats().decodes, 2);
 }
+
+/// A timeline the size of `video` showing it from its start on each of
+/// `layers` tracks, the upper ones at 50%.
+fn video_timeline(video: &Path, layers: usize) -> Editor {
+    use fw_doc::{Placement, TimelineSettings, Track, TrackId, TrackKind};
+    let info = fw_media::probe_video(video).unwrap();
+    let mut ids = SequentialIds::new(150);
+    let root = ids.next_id();
+    let settings = TimelineSettings {
+        width: info.width,
+        height: info.height,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    let mut commands = vec![];
+    for index in 0..layers {
+        let (track, clip) = (TrackId(ids.next_id()), ids.next_id());
+        commands.extend([
+            Command::AddTrack {
+                timeline: root,
+                track: Track {
+                    id: track,
+                    kind: TrackKind::Video,
+                    name: format!("V{}", index + 1),
+                },
+                index,
+            },
+            Command::AddNode {
+                parent: root,
+                id: clip,
+                type_id: "fw.clip".into(),
+                name: None,
+                placement: Some(Placement {
+                    track,
+                    start: Time::ZERO,
+                    duration: Time::from_seconds(60),
+                    source_in: Time::ZERO,
+                    speed: Time::from_seconds(1),
+                }),
+            },
+            set(
+                clip,
+                "file",
+                ParamValue::Media(MediaRef {
+                    path: video.display().to_string(),
+                }),
+            ),
+            set(
+                clip,
+                "opacity",
+                ParamValue::Float(if index == 0 { 100.0 } else { 50.0 }),
+            ),
+        ]);
+    }
+    editor.apply("Build", commands).unwrap();
+    editor
+}
+
+/// Renders `frames` of `video` with hardware and with software decoding,
+/// requiring identical pixels. Returns how many pictures were decoded in
+/// hardware and how many decoded at all; `None` when the GPU can't decode
+/// video.
+fn compare_hardware_decoding(video: &Path, layers: usize, frames: &[i64]) -> Option<(usize, u64)> {
+    let gpu = gpu();
+    let Some(device) = gpu.video_device() else {
+        eprintln!("{} has no hardware decoding; skipped", gpu.describe());
+        return None;
+    };
+    let info = fw_media::probe_video(video).unwrap();
+    let fw_compile::FrameTimes::Constant { rate, .. } = info.frames else {
+        panic!("expected a constant rate");
+    };
+    let editor = video_timeline(video, layers);
+    let software = ProjectMedia::new("/");
+    let mut hardware = ProjectMedia::new("/");
+    hardware.use_hardware(device).unwrap();
+    let mut on_cpu = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES);
+    let mut on_gpu = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES);
+    for &n in frames {
+        // Final quality, so nothing reads an editing copy.
+        let options = Options::at(Time::of_frame(n, rate).unwrap());
+        let plan = compile(editor.doc(), editor.registry(), &software, &options).unwrap();
+        let want = on_cpu.render(&plan, &software).unwrap();
+        let got = on_gpu.render(&plan, &hardware).unwrap();
+        assert!(
+            got.pixels == want.pixels,
+            "{}: frame {n} differs between hardware and software decoding",
+            video.display()
+        );
+    }
+    Some((hardware.hardware_frames(), on_gpu.stats().decodes))
+}
+
+#[test]
+fn hardware_decoding_matches_software() {
+    // In order, then seeking backwards past keyframes and far forwards.
+    let mut frames: Vec<i64> = (0..30).collect();
+    frames.extend([100, 5, 70, 49, 48, 47, 0, 119]);
+    if let Some((in_hardware, decoded)) =
+        compare_hardware_decoding(&fw_testmedia::h264(), 1, &frames)
+    {
+        assert_eq!(
+            in_hardware as u64, decoded,
+            "every frame was decoded in hardware"
+        );
+        assert!(decoded > 30);
+    }
+}
+
+#[test]
+fn one_hardware_picture_read_twice_in_a_plan() {
+    // Both layers load the same frame, so the plan reads one decoded
+    // picture twice; it must be acquired once, or its waits deadlock.
+    compare_hardware_decoding(&fw_testmedia::h264(), 2, &[0, 1, 2, 30]);
+}
+
+#[test]
+fn ten_bit_hardware_decoding_matches_software() {
+    // HEVC Main 10: P010 from hardware, 16-bit planes from software.
+    let frames = [0, 1, 2, 25, 3, 47];
+    if let Some((in_hardware, decoded)) =
+        compare_hardware_decoding(&fw_testmedia::hevc_10bit(), 1, &frames)
+    {
+        assert_eq!(
+            in_hardware as u64, decoded,
+            "every frame was decoded in hardware"
+        );
+    }
+}
+
+#[test]
+fn streams_the_hardware_cant_decode_fall_back_to_software() {
+    // 4:2:2 H.264: FFmpeg's Vulkan decoder declines it on today's GPUs.
+    let frames = [0, 1, 30, 2];
+    if let Some((in_hardware, decoded)) =
+        compare_hardware_decoding(&fw_testmedia::h264_422(), 1, &frames)
+    {
+        assert!(decoded > 0);
+        eprintln!("4:2:2: {in_hardware} of {decoded} pictures decoded in hardware");
+    }
+}

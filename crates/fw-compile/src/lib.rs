@@ -11,6 +11,7 @@
 mod audio;
 mod codegen;
 mod frames;
+mod hardware;
 mod lower;
 pub mod plan;
 
@@ -22,6 +23,7 @@ use fw_plugin::{MediaRef, Quality, Registry};
 
 pub use audio::{AudioPlan, Voice, compile_audio};
 pub use frames::FrameTimes;
+pub use hardware::{Acquired, Decoded, HardwareFrame, HardwarePicture, VulkanVideoDevice};
 pub use plan::{FillStep, KernelOp, KernelStep, LoadStep, Origin, Plan, Step};
 
 /// What the compiler needs to know about a media file. Looked up through a
@@ -61,9 +63,10 @@ pub trait MediaResolver {
 /// Decodes the file a load step names, for the renderer. Kept beside
 /// [`MediaResolver`] so one media adapter can serve both.
 pub trait Decoder {
-    /// The picture, `load.width` × `load.height`: straight-alpha RGBA, or
-    /// planes for the renderer to convert.
-    fn decode(&self, load: &LoadStep) -> Result<fw_core::DecodedImage, String>;
+    /// The picture, `load.width` × `load.height` (an editing copy may be
+    /// smaller): straight-alpha RGBA, planes for the renderer to convert, or
+    /// a hardware decoder's image already on the GPU.
+    fn decode(&self, load: &LoadStep) -> Result<Decoded, String>;
 }
 
 #[derive(Debug, Clone)]

@@ -2,15 +2,16 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use fw_compile::{Decoder, LoadStep, MediaInfo, MediaResolver};
+use fw_compile::{Decoded, Decoder, LoadStep, MediaInfo, MediaResolver};
 use fw_core::{DecodedImage, NodeId};
 use fw_plugin::MediaRef;
 
 use crate::copies::{CopyProfile, EditingCopies};
+use crate::hardware::HardwareDevice;
 use crate::{Format, VideoInfo, VideoReader, has_audio, probe_video};
 
 pub struct ProjectMedia {
@@ -30,6 +31,12 @@ pub struct ProjectMedia {
     copies: Option<EditingCopies>,
     /// Open readers on copy chunks, most recently used last.
     copy_readers: Mutex<Vec<CopyReader>>,
+    /// The engine's device, when video is decoded on it (design §12).
+    hardware: Option<Arc<HardwareDevice>>,
+    /// Files whose hardware decoding failed: they decode in software.
+    software_only: Mutex<std::collections::HashSet<PathBuf>>,
+    /// Pictures decoded in hardware. For tests.
+    hardware_frames: AtomicUsize,
 }
 
 /// Copy chunk readers kept open, at most. Opening one costs about 4 ms.
@@ -71,7 +78,25 @@ impl ProjectMedia {
             probe_reads: AtomicUsize::new(0),
             copies: None,
             copy_readers: Mutex::new(Vec::new()),
+            hardware: None,
+            software_only: Mutex::new(Default::default()),
+            hardware_frames: AtomicUsize::new(0),
         }
+    }
+
+    /// Decodes video on the engine's GPU where it can, from now on.
+    pub fn use_hardware(&mut self, device: fw_compile::VulkanVideoDevice) -> Result<(), String> {
+        self.hardware = Some(HardwareDevice::new(device)?);
+        self.readers
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        Ok(())
+    }
+
+    /// How many pictures were decoded in hardware.
+    pub fn hardware_frames(&self) -> usize {
+        self.hardware_frames.load(Ordering::Relaxed)
     }
 
     /// Also makes editing copies (design §12) under `root`, in the
@@ -217,7 +242,7 @@ impl ProjectMedia {
         load: &LoadStep,
         video: &VideoInfo,
         frame: fw_core::Time,
-    ) -> Result<DecodedImage, String> {
+    ) -> Result<Decoded, String> {
         let copies = self.copies.as_ref().ok_or("editing copies are off")?;
         let index = video
             .frames
@@ -241,7 +266,7 @@ impl ProjectMedia {
     }
 
     /// Frame `within` of a copy chunk, through the open readers.
-    fn read_chunk(&self, chunk: &Path, within: u64) -> Result<DecodedImage, String> {
+    fn read_chunk(&self, chunk: &Path, within: u64) -> Result<Decoded, String> {
         let mut readers = self.copy_readers.lock().unwrap_or_else(|e| e.into_inner());
         let at = match readers.iter().position(|r| r.chunk == chunk) {
             Some(i) => {
@@ -271,16 +296,16 @@ impl ProjectMedia {
             .ok_or("the copy chunk is short")?;
         r.reader
             .frame(time)
-            .map(DecodedImage::Planar)
+            .map(|p| Decoded::Cpu(DecodedImage::Planar(p)))
             .map_err(|e| e.to_string())
     }
 }
 
 impl Decoder for ProjectMedia {
-    fn decode(&self, load: &LoadStep) -> Result<DecodedImage, String> {
+    fn decode(&self, load: &LoadStep) -> Result<Decoded, String> {
         let Some(frame) = load.frame else {
             return crate::read_image(&load.path)
-                .map(|(image, _)| DecodedImage::Rgba(image))
+                .map(|(image, _)| Decoded::Cpu(DecodedImage::Rgba(image)))
                 .map_err(|e| e.to_string());
         };
         let video = self
@@ -290,6 +315,47 @@ impl Decoder for ProjectMedia {
         if load.copy.is_some() {
             return self.decode_copy(load, &video, frame);
         }
+        let hardware = self.hardware.as_ref().filter(|_| {
+            !self
+                .software_only
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&load.path)
+        });
+        match self.decode_video(load, &video, frame, hardware) {
+            Ok(decoded) => {
+                if matches!(decoded, Decoded::Hardware(_)) {
+                    self.hardware_frames.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(decoded)
+            }
+            // Hardware decoding failed: this file decodes in software from now on.
+            Err(_) if hardware.is_some() => {
+                self.software_only
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(load.path.clone());
+                self.readers
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&load.path);
+                self.decode_video(load, &video, frame, None)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl ProjectMedia {
+    /// The frame starting at `frame` from the original, through the open
+    /// readers, decoding on `hardware` if given.
+    fn decode_video(
+        &self,
+        load: &LoadStep,
+        video: &VideoInfo,
+        frame: fw_core::Time,
+        hardware: Option<&Arc<HardwareDevice>>,
+    ) -> Result<Decoded, String> {
         let mut readers = self.readers.lock().unwrap_or_else(|e| e.into_inner());
         let readers = readers.entry(load.path.clone()).or_default();
         let used = readers.iter().map(|r| r.used).max().unwrap_or(0) + 1;
@@ -308,8 +374,11 @@ impl Decoder for ProjectMedia {
         let index = match nearest.or(own) {
             Some(i) => i,
             None if readers.len() < READERS_PER_FILE => {
-                let reader =
-                    VideoReader::open_probed(&load.path, &video).map_err(|e| e.to_string())?;
+                let reader = match hardware {
+                    Some(device) => VideoReader::open_hardware(&load.path, video, device.clone()),
+                    None => VideoReader::open_probed(&load.path, video),
+                }
+                .map_err(|e| e.to_string())?;
                 readers.push(Reader {
                     reader,
                     node: load.node,
@@ -331,8 +400,7 @@ impl Decoder for ProjectMedia {
         reader.node = load.node;
         reader
             .reader
-            .frame(frame)
-            .map(DecodedImage::Planar)
+            .frame_decoded(frame)
             .map_err(|e| e.to_string())
     }
 }

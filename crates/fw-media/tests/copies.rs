@@ -264,7 +264,7 @@ fn a_lost_chunk_falls_back_to_the_original_and_is_made_again() {
     // Compiles now read the original, which decodes as usual...
     assert_eq!(media.editing_copy(&info, frame), None);
     assert_eq!(
-        grey(&media.decode(&load(None)).unwrap().to_rgba()),
+        grey(&media.decode(&load(None)).unwrap().to_rgba().unwrap()),
         level(15)
     );
     // ...until the chunk is made again.
@@ -273,5 +273,5 @@ fn a_lost_chunk_falls_back_to_the_original_and_is_made_again() {
     assert_eq!(media.editing_copy(&info, frame), Some("test"));
     let decoded = media.decode(&load(Some("test"))).unwrap();
     assert_eq!((decoded.size()), (32, 16));
-    assert_eq!(grey(&decoded.to_rgba()), level(15));
+    assert_eq!(grey(&decoded.to_rgba().unwrap()), level(15));
 }

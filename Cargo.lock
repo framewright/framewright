@@ -815,6 +815,7 @@ dependencies = [
 name = "fw-media"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "exr",
  "fw-compile",
  "fw-core",
@@ -864,6 +865,7 @@ dependencies = [
 name = "fw-render"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "bytemuck",
  "fw-compile",
  "fw-core",
@@ -873,6 +875,7 @@ dependencies = [
  "fw-plugin",
  "fw-testmedia",
  "half",
+ "naga",
  "pollster",
  "tempfile",
  "thiserror 2.0.21",

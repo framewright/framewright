@@ -138,7 +138,7 @@ fn encode(
         let s = &input.streams()[stream];
         (s.codecpar().clone(), s.time_base)
     };
-    let mut decoder = open_decoder(source, &par, Some(threads), false)?;
+    let mut decoder = open_decoder(source, &par, Some(threads), false, None)?;
     let (width, height) = profile.size_for(info.width, info.height);
     let mut scaler: Option<Scaler> = None;
     let mut index = 0u64;

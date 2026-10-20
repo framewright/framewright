@@ -10,6 +10,8 @@ fw-core.workspace = true
 exr = "1"
 fw-compile.workspace = true
 fw-plugin.workspace = true
+# The same ash as wgpu-hal, for the raw Vulkan work hardware decoding needs.
+ash = "0.38"
 libc = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 rsmpeg.workspace = true

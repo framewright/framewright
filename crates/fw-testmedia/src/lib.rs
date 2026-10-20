@@ -216,6 +216,55 @@ pub fn h264() -> PathBuf {
     ensure(&H264)
 }
 
+/// The H.264 test pattern as 10-bit HEVC: hardware decoders give P010.
+const HEVC_10BIT: Recipe = Recipe {
+    name: "testsrc-hevc-10bit.mp4",
+    args: &[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=s=320x180:r=24000/1001:d=2",
+        "-vf",
+        "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
+        "-c:v",
+        "libx265",
+        "-pix_fmt",
+        "yuv420p10le",
+        "-x265-params",
+        "keyint=24:bframes=2:log-level=error",
+        "-tag:v",
+        "hvc1",
+    ],
+};
+
+pub fn hevc_10bit() -> PathBuf {
+    ensure(&HEVC_10BIT)
+}
+
+/// The H.264 test pattern in 4:2:2, which many hardware decoders can't
+/// decode, so FFmpeg falls back to software.
+const H264_422: Recipe = Recipe {
+    name: "testsrc-h264-422.mp4",
+    args: &[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=s=320x180:r=24000/1001:d=2",
+        "-vf",
+        "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv422p",
+        "-g",
+        "24",
+    ],
+};
+
+pub fn h264_422() -> PathBuf {
+    ensure(&H264_422)
+}
+
 pub fn count_alpha() -> PathBuf {
     ensure(&ALPHA)
 }
