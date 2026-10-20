@@ -8,6 +8,7 @@
 //!   "format": "framewright.project",
 //!   "format_version": 1,
 //!   "root": "<id>",
+//!   "media": ["clips/beach.mp4"],
 //!   "nodes": {
 //!     "<id>": {
 //!       "type": "fw.graph",
@@ -60,6 +61,7 @@ pub fn to_json(doc: &Document) -> String {
         format: FORMAT,
         format_version: FORMAT_VERSION,
         root: doc.root,
+        media: doc.media_pool().collect(),
         nodes: BTreeMap::from([(doc.root, node_out(doc, doc.root))]),
     };
     let mut text = serde_json::to_string_pretty(&file).expect("documents always serialize");
@@ -85,6 +87,7 @@ pub fn from_json(text: &str, registry: &Registry) -> Result<Document, LoadError>
         root: file.root,
         nodes: OrdMap::new(),
         parents: OrdMap::new(),
+        media: file.media.into_iter().collect(),
     };
     read_node(&mut doc, registry, file.root, &file.nodes[&file.root])?;
     if doc
@@ -104,6 +107,8 @@ struct FileOut<'a> {
     format: &'static str,
     format_version: u32,
     root: NodeId,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    media: Vec<&'a str>,
     nodes: BTreeMap<NodeId, NodeOut<'a>>,
 }
 
@@ -198,6 +203,8 @@ struct FileIn {
     format_version: u32,
     root: NodeId,
     nodes: BTreeMap<NodeId, Box<RawValue>>,
+    #[serde(default)]
+    media: Vec<String>,
 }
 
 /// Just enough of a node to decide whether we understand it.

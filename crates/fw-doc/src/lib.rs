@@ -7,6 +7,7 @@
 pub mod clip_graph;
 pub mod command;
 pub mod document;
+pub mod edits;
 pub mod format;
 pub mod history;
 pub mod node;

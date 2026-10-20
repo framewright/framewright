@@ -146,6 +146,54 @@ impl Param {
         })
     }
 
+    /// The two halves of a clip's parameter when the clip, `length` long, is
+    /// split `at` from its start. Each half is keyed so it shows the same
+    /// values it did before: start-anchored keys move with the second half's
+    /// new start, and end-anchored keys stay with the end they were measured
+    /// from. Keys outside a half stay, since they shape the curve inside it.
+    pub fn split(&self, at: Time, length: Time) -> Result<(Param, Param), TimeError> {
+        let Param::Keyframed(k) = self else {
+            return Ok((self.clone(), self.clone()));
+        };
+        let mut first = vec![];
+        let mut second = vec![];
+        for key in &k.keyframes {
+            let when = match key.anchor {
+                Anchor::Start => key.t,
+                Anchor::End => length.checked_add(key.t)?,
+                Anchor::Fraction(f) => length.checked_mul(f)?.checked_add(key.t)?,
+            };
+            let start_at = |t| Keyframe {
+                t,
+                anchor: Anchor::Start,
+                ..key.clone()
+            };
+            first.push(match key.anchor {
+                Anchor::Start => key.clone(),
+                _ => start_at(when),
+            });
+            second.push(match key.anchor {
+                Anchor::End => key.clone(),
+                _ => start_at(when.checked_sub(at)?),
+            });
+        }
+        Ok((Param::keyed(first), Param::keyed(second)))
+    }
+
+    /// Keys in order, keeping the last where two land on the same anchor
+    /// and time.
+    fn keyed(mut keys: Vec<Keyframe>) -> Param {
+        keys.sort_by_key(|k| (k.anchor != Anchor::Start, k.t));
+        let mut kept: Vec<Keyframe> = vec![];
+        for key in keys {
+            match kept.last_mut() {
+                Some(last) if last.anchor == key.anchor && last.t == key.t => *last = key,
+                _ => kept.push(key),
+            }
+        }
+        Param::Keyframed(Keyframes { keyframes: kept })
+    }
+
     /// Whether the value can differ between two times.
     pub fn varies_with_time(&self) -> bool {
         match self {

@@ -18,6 +18,9 @@ pub struct Document {
     pub(crate) nodes: OrdMap<NodeId, Node>,
     /// The container holding each node. The root has no entry.
     pub(crate) parents: OrdMap<NodeId, NodeId>,
+    /// Media imported into the project, used or not, as paths relative to
+    /// the project file (the same form clips refer to it by).
+    pub(crate) media: OrdSet<String>,
 }
 
 impl Document {
@@ -49,11 +52,17 @@ impl Document {
             root,
             nodes: OrdMap::unit(root, node),
             parents: OrdMap::new(),
+            media: OrdSet::new(),
         }
     }
 
     pub fn root(&self) -> NodeId {
         self.root
+    }
+
+    /// The media pool: files imported into the project, in path order.
+    pub fn media_pool(&self) -> impl Iterator<Item = &str> {
+        self.media.iter().map(String::as_str)
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {

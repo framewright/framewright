@@ -74,6 +74,23 @@ pub enum Command {
         node: NodeId,
         position: Option<[f64; 2]>,
     },
+    /// Copies a node, with everything nested inside it, into the same
+    /// container as `new_id`. Nested copies get ids derived from `new_id`,
+    /// so replaying the command gives the same document.
+    DuplicateNode {
+        id: NodeId,
+        new_id: NodeId,
+        /// Required when the container is a Timeline, and only then.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<Placement>,
+    },
+    /// Imports a file into the project's media pool.
+    AddMedia {
+        path: String,
+    },
+    RemoveMedia {
+        path: String,
+    },
     /// Inserts a track at `index` (0 is the bottom).
     AddTrack {
         timeline: NodeId,
@@ -130,6 +147,10 @@ pub enum CommandError {
     Track(String),
     #[error("node position: {0}")]
     Position(String),
+    #[error("{0} is already in the media pool")]
+    MediaListed(String),
+    #[error("{0} isn't in the media pool")]
+    MediaNotListed(String),
 }
 
 impl Command {
@@ -165,6 +186,8 @@ impl Command {
             Command::Connect { edge } => vec![edge.from.node, edge.to.node],
             Command::Disconnect { input } => vec![input.node],
             Command::SetPlacement { node, .. } | Command::SetPosition { node, .. } => vec![*node],
+            Command::DuplicateNode { new_id, .. } => vec![*new_id],
+            Command::AddMedia { .. } | Command::RemoveMedia { .. } => vec![],
             Command::AddTrack { timeline, .. } | Command::RemoveTrack { timeline, .. } => {
                 vec![*timeline]
             }
@@ -378,6 +401,52 @@ impl Command {
                 })
             }
 
+            Command::DuplicateNode {
+                id,
+                new_id,
+                placement,
+            } => {
+                if *id == doc.root {
+                    return Err(CommandError::Root);
+                }
+                let parent = doc.parent(*id).ok_or(CommandError::NoSuchNode(*id))?;
+                let originals = doc.subtree(*id);
+                let copy = |old: NodeId| copy_id(*id, *new_id, old);
+                for old in &originals {
+                    // An unknown node's nested ids live inside its saved bytes,
+                    // where they can't be given new ones.
+                    if matches!(doc.nodes[old], Node::Unknown(_)) {
+                        return Err(CommandError::ReadOnly(*old));
+                    }
+                    if doc.contains(copy(*old)) {
+                        return Err(CommandError::DuplicateId(copy(*old)));
+                    }
+                }
+                for old in &originals {
+                    let node = copied_node(&doc.nodes[old], &copy);
+                    for child in node.children() {
+                        doc.parents.insert(child, copy(*old));
+                    }
+                    doc.nodes.insert(copy(*old), node);
+                }
+                place(doc, parent, *new_id, placement.clone(), None, &[])?;
+                Ok(Command::RemoveNode { id: *new_id })
+            }
+
+            Command::AddMedia { path } => {
+                if doc.media.insert(path.clone()).is_some() {
+                    return Err(CommandError::MediaListed(path.clone()));
+                }
+                Ok(Command::RemoveMedia { path: path.clone() })
+            }
+
+            Command::RemoveMedia { path } => {
+                if doc.media.remove(path).is_none() {
+                    return Err(CommandError::MediaNotListed(path.clone()));
+                }
+                Ok(Command::AddMedia { path: path.clone() })
+            }
+
             Command::AddTrack {
                 timeline,
                 track,
@@ -422,6 +491,52 @@ impl Command {
             }
         }
     }
+}
+
+/// The id `old`, nested in `original`, has in a copy of it made as `copy`.
+/// A clip's starting Input and Output keep their roles, so a copied clip
+/// that still passes its media through is still saved without its graph.
+pub(crate) fn copy_id(original: NodeId, copy: NodeId, old: NodeId) -> NodeId {
+    let (input, output) = clip_graph_ids(original);
+    let (copy_input, copy_output) = clip_graph_ids(copy);
+    match old {
+        _ if old == original => copy,
+        _ if old == input => copy_input,
+        _ if old == output => copy_output,
+        _ => copy.derived(&old.to_string()),
+    }
+}
+
+/// `node` with the ids inside its contents given by `copy`.
+fn copied_node(node: &Node, copy: &impl Fn(NodeId) -> NodeId) -> Node {
+    let Node::Known(known) = node else {
+        return node.clone();
+    };
+    let port = |p: &PortRef| PortRef::new(copy(p.node), &p.port);
+    let contents = known.contents.as_ref().map(|contents| match contents {
+        Contents::Graph(g) => Contents::Graph(Graph {
+            nodes: g.nodes.iter().map(|id| copy(*id)).collect(),
+            inputs: g
+                .inputs
+                .iter()
+                .map(|(to, from)| (port(to), port(from)))
+                .collect(),
+            positions: g.positions.iter().map(|(id, p)| (copy(*id), *p)).collect(),
+        }),
+        Contents::Timeline(t) => {
+            let mut t = t.clone();
+            t.clips = t
+                .clips
+                .iter()
+                .map(|(id, p)| (copy(*id), p.clone()))
+                .collect();
+            Contents::Timeline(t)
+        }
+    });
+    Node::Known(KnownNode {
+        contents,
+        ..known.clone()
+    })
 }
 
 fn empty_contents(kind: ContainerKind) -> Contents {
