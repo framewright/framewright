@@ -226,6 +226,22 @@ impl ProjectMedia {
         let (chunk, within) = copies
             .locate(&load.fingerprint, index)
             .ok_or_else(|| format!("no editing copy of {}", load.path.display()))?;
+        let k = index / copies.profile().chunk_frames;
+        let result = self.read_chunk(&chunk, within);
+        if result.is_err() {
+            // Missing or damaged: drop it and fall back to the original
+            // until it's made again.
+            self.copy_readers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|r| r.chunk != chunk);
+            copies.invalidate(&load.fingerprint, k);
+        }
+        result
+    }
+
+    /// Frame `within` of a copy chunk, through the open readers.
+    fn read_chunk(&self, chunk: &Path, within: u64) -> Result<DecodedImage, String> {
         let mut readers = self.copy_readers.lock().unwrap_or_else(|e| e.into_inner());
         let at = match readers.iter().position(|r| r.chunk == chunk) {
             Some(i) => {
@@ -234,13 +250,13 @@ impl ProjectMedia {
                 readers.len() - 1
             }
             None => {
-                let info = probe_video(&chunk).map_err(|e| e.to_string())?;
-                let reader = VideoReader::open_intra(&chunk, &info).map_err(|e| e.to_string())?;
+                let info = probe_video(chunk).map_err(|e| e.to_string())?;
+                let reader = VideoReader::open_intra(chunk, &info).map_err(|e| e.to_string())?;
                 if readers.len() == COPY_READERS {
                     readers.remove(0);
                 }
                 readers.push(CopyReader {
-                    chunk,
+                    chunk: chunk.to_owned(),
                     info,
                     reader,
                 });

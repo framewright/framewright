@@ -95,6 +95,11 @@ fn encode_error(path: &Path) -> impl Fn(String) -> MediaError + use<> {
 /// `done(k)` is called as chunk `k` lands. Returns early, without error,
 /// when `stop` is set.
 ///
+/// Each frame's timestamp is checked against the one the probe found for
+/// its index, so a chunk only lands when every frame in it is the right one.
+/// If the decoder skips or loses a frame, this fails, and chunks already
+/// landed stay correct.
+///
 /// TODO: when resuming, seek to the first missing chunk instead of decoding
 /// from the start.
 pub fn write_copy(
@@ -104,7 +109,27 @@ pub fn write_copy(
     dir: &Path,
     threads: usize,
     stop: &AtomicBool,
+    done: impl FnMut(u64),
+) -> Result<(), MediaError> {
+    let mut chunk = None;
+    let result = encode(source, info, profile, dir, threads, stop, done, &mut chunk);
+    // A chunk still open didn't finish: it never lands.
+    if let Some(c) = chunk {
+        let _ = fs::remove_file(&c.part);
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode(
+    source: &Path,
+    info: &VideoInfo,
+    profile: &CopyProfile,
+    dir: &Path,
+    threads: usize,
+    stop: &AtomicBool,
     mut done: impl FnMut(u64),
+    chunk: &mut Option<ChunkWriter>,
 ) -> Result<(), MediaError> {
     let err = encode_error(dir);
     fs::create_dir_all(dir).map_err(|e| err(e.to_string()))?;
@@ -116,7 +141,6 @@ pub fn write_copy(
     let mut decoder = open_decoder(source, &par, Some(threads), false)?;
     let (width, height) = profile.size_for(info.width, info.height);
     let mut scaler: Option<Scaler> = None;
-    let mut chunk: Option<ChunkWriter> = None;
     let mut index = 0u64;
     let mut draining = false;
     loop {
@@ -144,6 +168,13 @@ pub fn write_copy(
         if stop.load(Ordering::Relaxed) {
             return Ok(());
         }
+        let expected = expected_pts(info, index);
+        if expected != Some(frame.best_effort_timestamp) {
+            return Err(err(format!(
+                "frame {index} has timestamp {}, the probe found {expected:?}",
+                frame.best_effort_timestamp
+            )));
+        }
         let k = index / profile.chunk_frames;
         if index.is_multiple_of(profile.chunk_frames) {
             if let Some(c) = chunk.take() {
@@ -152,7 +183,7 @@ pub fn write_copy(
             }
             let path = CopyProfile::chunk_path(dir, k);
             if !path.exists() {
-                chunk = Some(ChunkWriter::start(
+                *chunk = Some(ChunkWriter::start(
                     &path,
                     &frame,
                     (width, height),
@@ -187,17 +218,32 @@ pub fn write_copy(
         unsafe { (*out.as_mut_ptr()).duration = duration_of(info, index - 1)? };
         writer.write(&out)?;
     }
-    if let Some(c) = chunk.take() {
-        c.finish()?;
-        done((index - 1) / profile.chunk_frames);
-    }
+    // A short stream would leave the last chunk without its last frames.
     if index != info.frames.count() {
         return Err(err(format!(
             "decoded {index} frames, the probe found {}",
             info.frames.count()
         )));
     }
+    if let Some(c) = chunk.take() {
+        c.finish()?;
+        done((index - 1) / profile.chunk_frames);
+    }
     Ok(())
+}
+
+/// The timestamp frame `index` has in the source, rounded to the nearest
+/// tick as `VideoReader` rounds.
+fn expected_pts(info: &VideoInfo, index: u64) -> Option<i64> {
+    let at = info.frames.time_of(index)?;
+    let per_second = fw_core::Time::from_seconds(1).checked_div(info.tick).ok()?;
+    let half_tick = info.tick.checked_div(fw_core::Time::from_seconds(2)).ok()?;
+    let ticks = at
+        .checked_add(half_tick)
+        .ok()?
+        .frame_index(per_second)
+        .ok()?;
+    Some(info.first_pts + ticks)
 }
 
 /// How long frame `index` lasts, in stream ticks: until the next frame, or
@@ -483,11 +529,16 @@ struct State {
 }
 
 struct Copy {
-    dir: PathBuf,
+    job: Job,
     /// Which chunks are complete on disk.
     ready: Vec<bool>,
+    /// Queued or being written.
+    pending: bool,
+    /// Why making it failed. It isn't tried again this session.
+    failed: Option<String>,
 }
 
+#[derive(Clone)]
 struct Job {
     source: PathBuf,
     fingerprint: ContentHash,
@@ -538,23 +589,50 @@ impl EditingCopies {
         let ready: Vec<bool> = (0..self.profile.chunk_count(info))
             .map(|k| CopyProfile::chunk_path(&dir, k).exists())
             .collect();
-        let complete = ready.iter().all(|r| *r);
+        let job = Job {
+            source: source.to_owned(),
+            fingerprint,
+            info: info.clone(),
+            dir,
+        };
+        let pending = !ready.iter().all(|r| *r);
+        if pending {
+            state.queue.push_back(job.clone());
+            self.shared.changed.notify_all();
+        }
         state.copies.insert(
             fingerprint,
             Copy {
-                dir: dir.clone(),
+                job,
                 ready,
+                pending,
+                failed: None,
             },
         );
-        if !complete {
-            state.queue.push_back(Job {
-                source: source.to_owned(),
-                fingerprint,
-                info: info.clone(),
-                dir,
-            });
+    }
+
+    /// Chunk `k` of the source's copy turned out to be missing or unreadable
+    /// (the cache was cleared, say): stop using it, and make it again.
+    pub fn invalidate(&self, fingerprint: &ContentHash, k: u64) {
+        let mut state = self.shared.lock();
+        let State { copies, queue, .. } = &mut *state;
+        let Some(copy) = copies.get_mut(fingerprint) else {
+            return;
+        };
+        if let Some(ready) = copy.ready.get_mut(k as usize) {
+            *ready = false;
+        }
+        let _ = fs::remove_file(CopyProfile::chunk_path(&copy.job.dir, k));
+        if !copy.pending && copy.failed.is_none() {
+            copy.pending = true;
+            queue.push_back(copy.job.clone());
             self.shared.changed.notify_all();
         }
+    }
+
+    /// Why the source's copy couldn't be made, if it couldn't.
+    pub fn failure(&self, fingerprint: &ContentHash) -> Option<String> {
+        self.shared.lock().copies.get(fingerprint)?.failed.clone()
     }
 
     /// Where frame `index` of the source is in its copy, if that chunk is
@@ -569,7 +647,7 @@ impl EditingCopies {
             .unwrap_or(false)
             .then(|| {
                 (
-                    CopyProfile::chunk_path(&copy.dir, k),
+                    CopyProfile::chunk_path(&copy.job.dir, k),
                     index % self.profile.chunk_frames,
                 )
             })
@@ -652,11 +730,15 @@ fn work(shared: &Shared, profile: &CopyProfile) {
                 }
             },
         );
-        if let Err(e) = result {
-            // The original stays in use; nothing else depends on the copy.
-            eprintln!("editing copy of {} failed: {e}", job.source.display());
+        let mut state = shared.lock();
+        if let Some(copy) = state.copies.get_mut(&job.fingerprint) {
+            copy.pending = false;
+            // Chunks that landed are right; the rest of the clip reads the
+            // original. TODO: show the failure in the UI.
+            copy.failed = result.err().map(|e| e.to_string());
         }
-        shared.lock().busy = false;
+        state.busy = false;
+        drop(state);
         shared.changed.notify_all();
     }
 }

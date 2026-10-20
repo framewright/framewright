@@ -222,3 +222,56 @@ fn copies_from_an_earlier_session_are_reused() {
         .unwrap();
     assert_eq!(kept, after, "chunk 0 was not rewritten");
 }
+
+#[test]
+fn a_lost_chunk_falls_back_to_the_original_and_is_made_again() {
+    use fw_compile::{Decoder, MediaResolver};
+    use fw_media::ProjectMedia;
+    // Half size, so even this intra-frame clip gets a copy.
+    let half = CopyProfile {
+        max_width: 32,
+        max_height: 16,
+        ..PROFILE
+    };
+    let root = tempfile::tempdir().unwrap();
+    let media = ProjectMedia::with_copies("/", root.path(), half);
+    let reference = fw_plugin::MediaRef {
+        path: fw_testmedia::count_24fps().display().to_string(),
+    };
+    let info = media.probe(&reference).unwrap();
+    let copies = media.copies().unwrap();
+    copies.wait();
+    let frame = info.frames.as_ref().unwrap().time_of(15).unwrap();
+    let load = |copy| fw_compile::LoadStep {
+        output: fw_plugin::ImageHandle(0),
+        key: info.fingerprint,
+        path: info.path.clone(),
+        fingerprint: info.fingerprint,
+        space: info.space,
+        width: info.width,
+        height: info.height,
+        region: fw_core::Rect::from_size(64.0, 32.0),
+        frame: Some(frame),
+        node: None,
+        copy,
+    };
+    assert_eq!(media.editing_copy(&info, frame), Some("test"));
+
+    // The cache is cleared under a running session, before the chunk is read.
+    let (chunk, _) = copies.locate(&info.fingerprint, 15).unwrap();
+    std::fs::remove_file(&chunk).unwrap();
+    assert!(media.decode(&load(Some("test"))).is_err());
+    // Compiles now read the original, which decodes as usual...
+    assert_eq!(media.editing_copy(&info, frame), None);
+    assert_eq!(
+        grey(&media.decode(&load(None)).unwrap().to_rgba()),
+        level(15)
+    );
+    // ...until the chunk is made again.
+    copies.wait();
+    assert_eq!(copies.failure(&info.fingerprint), None);
+    assert_eq!(media.editing_copy(&info, frame), Some("test"));
+    let decoded = media.decode(&load(Some("test"))).unwrap();
+    assert_eq!((decoded.size()), (32, 16));
+    assert_eq!(grey(&decoded.to_rgba()), level(15));
+}
