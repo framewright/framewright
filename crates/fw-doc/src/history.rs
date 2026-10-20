@@ -29,7 +29,7 @@ pub enum Cause {
     Redo { label: String },
 }
 
-/// One undoable step: a labelled group of commands.
+/// One undoable step: a labeled group of commands.
 #[derive(Debug, Clone)]
 struct Step {
     label: String,

@@ -1,7 +1,7 @@
 //! A project open for editing: the engine as one object (design §10.1).
 //!
 //! Clients drive it with [`Request`]s and hear back through [`Event`]s, all
-//! plain serialisable data, so the UI, scripts and tests drive it the same
+//! plain serializable data, so the UI, scripts and tests drive it the same
 //! way. Calls return quickly: rendering, decoding and making editing copies
 //! happen on the engine's own threads.
 //!
@@ -410,7 +410,7 @@ impl Engine {
     pub fn media(&mut self) -> &[MediaSummary] {
         let revision = self.editor.revision();
         if self.media.as_ref().map(|m| m.0) != Some(revision) {
-            let summaries = media::summarise_media(self.editor.doc(), &self.info);
+            let summaries = media::summarize_media(self.editor.doc(), &self.info);
             self.media = Some((revision, summaries));
         }
         &self.media.as_ref().expect("just filled").1

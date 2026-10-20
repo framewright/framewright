@@ -1,6 +1,6 @@
 //! Icons: the mockups' 24×24 stroked SVG paths, drawn as egui lines. egui
 //! has no vector paths of its own, and rasterising SVGs would need a texture
-//! per size and colour.
+//! per size and color.
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2};
 
@@ -22,12 +22,12 @@ pub const CHEV_R: &str = "M9 6l6 6-6 6";
 pub const UNDO: &str = "M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-3";
 pub const REDO: &str = "M15 14l5-5-5-5M20 9H9a5 5 0 000 10h3";
 pub const CHECK: &str = "M5 12l4 4L19 6";
-pub const MINIMISE: &str = "M6 12h12";
-pub const MAXIMISE: &str = "M6 6h12v12H6z";
+pub const MINIMIZE: &str = "M6 12h12";
+pub const MAXIMIZE: &str = "M6 6h12v12H6z";
 pub const RESTORE: &str = "M6 9h9v9H6zM9 9V6h9v9h-3";
 pub const CLOSE: &str = "M6 6l12 12M18 6L6 18";
 pub const IMAGE: &str = "M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6";
-pub const COLOUR: &str = "M12 21a9 9 0 110-18 9 9 0 010 18zM12 3v18";
+pub const COLOR: &str = "M12 21a9 9 0 110-18 9 9 0 010 18zM12 3v18";
 pub const OUTPUT: &str = "M9 12h12M17 8l4 4-4 4M7 4H3v16h4";
 pub const NEST: &str = "M8 8h12v12H8zM4 16V4h12";
 pub const FILTER: &str = "M4 5h16l-6 8v6l-4-2v-4z";

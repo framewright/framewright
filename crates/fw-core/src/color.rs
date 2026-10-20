@@ -1,4 +1,4 @@
-//! Colour-space descriptors.
+//! Color-space descriptors.
 //!
 //! These are plain data plus the maths to convert between them. The GPU side of
 //! conversion is generated from the same descriptors by the compiler.
@@ -77,7 +77,7 @@ impl ColorSpace {
         }
     }
 
-    /// An unpremultiplied colour given in this space, in `to`.
+    /// An unpremultiplied color given in this space, in `to`.
     pub fn convert(self, rgb: [f64; 3], to: ColorSpace) -> [f64; 3] {
         let linear = rgb.map(|v| self.transfer.decode(v));
         let moved = mul_vec(&conversion_matrix(self.primaries, to.primaries), linear);

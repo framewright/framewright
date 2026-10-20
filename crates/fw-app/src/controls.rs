@@ -259,13 +259,13 @@ pub fn number_row(
             Stroke::new(1.0, border),
             StrokeKind::Inside,
         );
-        let colour = if enabled { t::TEXT } else { t::TEXT3 };
+        let color = if enabled { t::TEXT } else { t::TEXT3 };
         painter.text(
             pos2(field.right() - 6.0, cy),
             Align2::RIGHT_CENTER,
             number.show(value),
             mono(11.0),
-            colour,
+            color,
         );
         let shown = format!("{label} {}", number.show(value));
         let response = if enabled {
@@ -316,7 +316,7 @@ fn row_frame(ui: &mut Ui, id: egui::Id, label: &str) -> (Rect, Rect, Option<Chan
     let response = ui
         .interact(label_rect, id.with("label"), Sense::click())
         .on_hover_text("Double-click to reset");
-    let colour = if response.hovered() {
+    let color = if response.hovered() {
         t::TEXT
     } else {
         t::TEXT2
@@ -326,23 +326,23 @@ fn row_frame(ui: &mut Ui, id: egui::Id, label: &str) -> (Rect, Rect, Option<Chan
         Align2::LEFT_CENTER,
         label,
         sans(12.0),
-        colour,
+        color,
     );
     let change = response.double_clicked().then_some(Change::Reset);
     (rect, inner, change)
 }
 
 /// TODO: keyframing from the inspector. Drawn so the row reads as designed.
-fn keyframe_diamond(ui: &mut Ui, id: egui::Id, centre: egui::Pos2) -> Rect {
-    let rect = Rect::from_center_size(centre, vec2(14.0, 14.0));
+fn keyframe_diamond(ui: &mut Ui, id: egui::Id, center: egui::Pos2) -> Rect {
+    let rect = Rect::from_center_size(center, vec2(14.0, 14.0));
     let response = ui.interact(rect, id.with("keyframe"), Sense::hover());
     response.on_hover_text("Keyframing from here isn't built yet");
     let r = 3.6;
     let points = vec![
-        centre + vec2(0.0, -r),
-        centre + vec2(r, 0.0),
-        centre + vec2(0.0, r),
-        centre + vec2(-r, 0.0),
+        center + vec2(0.0, -r),
+        center + vec2(r, 0.0),
+        center + vec2(0.0, r),
+        center + vec2(-r, 0.0),
     ];
     ui.painter().add(egui::Shape::convex_polygon(
         points,

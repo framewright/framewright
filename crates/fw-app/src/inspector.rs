@@ -299,7 +299,7 @@ fn param_row(
                 .or(changed.map(|gesture| ParamChange::Value(ParamValue::Vec2(v), Some(gesture))))
         }
         // TODO: a picker in the Studio style that keeps values above 1.0 and
-        // shows which colour space they're in.
+        // shows which color space they're in.
         (ParamKind::Color, ParamValue::Color(color)) => {
             let mut rgba = color.rgba.map(|v| v as f32);
             let mut changed = None;

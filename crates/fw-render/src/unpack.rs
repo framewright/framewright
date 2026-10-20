@@ -12,7 +12,7 @@ pub(crate) enum Source {
     /// each exactly its plane's size: decoded planes we uploaded.
     Planes,
     /// A hardware decoder's image, viewed as a luma and an interleaved
-    /// Cb/Cr texture of normalised values, codes being `value × max`. The
+    /// Cb/Cr texture of normalized values, codes being `value × max`. The
     /// image may be padded beyond the picture, so the last sample of each
     /// plane is given rather than taken from the texture.
     TwoPlane {
@@ -75,7 +75,7 @@ fn last(c: u32) -> vec2<u32> {{
                 r#"@group(0) @binding(1) var y_plane: texture_2d<f32>;
 @group(0) @binding(2) var cbcr_plane: texture_2d<f32>;
 
-// Component `c`'s code at `p`. Normalised values back to exact codes.
+// Component `c`'s code at `p`. Normalized values back to exact codes.
 fn code(c: u32, p: vec2<u32>) -> f32 {{
     switch c {{
         case 0u: {{ return round(textureLoad(y_plane, p, 0).r * {max:?}); }}
@@ -98,7 +98,7 @@ fn last(c: u32) -> vec2<u32> {{
     }
     let first = |shift: u32, siting: Siting| match siting {
         Siting::Cosited => 0.0,
-        Siting::Centred => ((1u32 << shift) as f32 - 1.0) / 2.0,
+        Siting::Centered => ((1u32 << shift) as f32 - 1.0) / 2.0,
     };
     let (sx, sy) = e.chroma_shift;
     w.push_str(
@@ -128,7 +128,7 @@ fn bilinear(c: u32, u: vec2<f32>) -> f32 {
     };
     w.push_str(&format!(
         r#"
-// Chroma component `c` at luma position `s`, honouring siting.
+// Chroma component `c` at luma position `s`, honoring siting.
 fn chroma(c: u32, s: vec2<f32>) -> f32 {{
     return bilinear(c, (s - vec2<f32>({fx:?}, {fy:?})) / vec2<f32>({kx:?}, {ky:?}));
 }}
@@ -173,7 +173,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
     w
 }
 
-/// Fills binding 0 with one premultiplied colour.
+/// Fills binding 0 with one premultiplied color.
 pub(crate) fn fill(rgba: [f32; 4]) -> String {
     let [r, g, b, a] = rgba;
     format!(
@@ -216,7 +216,7 @@ mod tests {
             bits: 8,
             shift: 0,
             chroma_shift: (1, 1),
-            siting: (Siting::Cosited, Siting::Centred),
+            siting: (Siting::Cosited, Siting::Centered),
             alpha: false,
         };
         let rgba = PlanarEncoding {

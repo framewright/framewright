@@ -1,7 +1,7 @@
 //! Read Image: a still image file as a source.
 
 use fw_plugin::{
-    ImageBehaviour, ImageHandle, NodeError, NodeType, NodeTypeDesc, ParamDesc, PlanBuilder,
+    ImageBehavior, ImageHandle, NodeError, NodeType, NodeTypeDesc, ParamDesc, PlanBuilder,
     PortDesc, PortType, Request, ResolvedParams,
 };
 
@@ -17,7 +17,7 @@ pub fn node_type() -> NodeType {
         outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
         params: vec![
             ParamDesc::media("file", "File"),
-            ParamDesc::choice("space", "Colour space", &SPACE_CHOICES, "auto"),
+            ParamDesc::choice("space", "Color space", &SPACE_CHOICES, "auto"),
         ],
         varies_with_time: false,
         container: None,
@@ -27,7 +27,7 @@ pub fn node_type() -> NodeType {
 
 struct ReadImage;
 
-impl ImageBehaviour for ReadImage {
+impl ImageBehavior for ReadImage {
     fn emit(
         &self,
         params: &ResolvedParams,

@@ -156,7 +156,7 @@ pub struct LoadStep {
     pub copy: Option<&'static str>,
 }
 
-/// An image of one colour, e.g. the transparent black of a timeline gap.
+/// An image of one color, e.g. the transparent black of a timeline gap.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FillStep {
     pub output: ImageHandle,
@@ -217,7 +217,7 @@ pub enum Origin {
         node: NodeId,
         name: String,
     },
-    /// Inserted by the compiler to meet a node's colour-space needs.
+    /// Inserted by the compiler to meet a node's color-space needs.
     Conversion { from: ColorSpace, to: ColorSpace },
     /// A container combining its children, e.g. a timeline's tracks.
     Composite { container: NodeId, mode: String },

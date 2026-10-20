@@ -1,10 +1,10 @@
-//! Audio behaviour: the real-time contract.
+//! Audio behavior: the real-time contract.
 //!
-//! Separate from image behaviour because it runs differently: continuously,
+//! Separate from image behavior because it runs differently: continuously,
 //! in small blocks, on the audio thread. A node may have either or both.
 
 /// Makes processors for a node type. Called off the audio thread.
-pub trait AudioBehaviour: Send + Sync {
+pub trait AudioBehavior: Send + Sync {
     fn create(&self) -> Box<dyn AudioProcessor>;
 
     /// The numeric parameters `process` reads, by id. The engine resolves
@@ -40,7 +40,7 @@ pub struct AudioBlock<'a> {
     pub output: &'a mut [f32],
     pub frames: usize,
     pub channels: usize,
-    /// The parameters named by [`AudioBehaviour::params`], in that order,
+    /// The parameters named by [`AudioBehavior::params`], in that order,
     /// already resolved for this block. Nodes never see automation.
     pub params: &'a [f32],
 }

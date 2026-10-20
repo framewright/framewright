@@ -14,7 +14,7 @@ fn t(s: &str) -> Time {
 /// Which counting frame an image is, read from one pixel.
 fn frame_number(img: &RgbaImage) -> u8 {
     let [r, g, b, _] = img.pixel(5, 5);
-    assert_eq!((r, g), (b, b), "counting frames are grey");
+    assert_eq!((r, g), (b, b), "counting frames are gray");
     (r * 255.0).round() as u8
 }
 
@@ -121,7 +121,7 @@ fn alpha_survives_decoding() {
         .to_rgba();
     let alpha = frame.pixel(3, 3)[3];
     assert!((alpha - 128.0 / 255.0).abs() < 1e-6, "alpha {alpha}");
-    // Colour stays straight (not premultiplied) and exact.
+    // Color stays straight (not premultiplied) and exact.
     assert_eq!(frame_number(&frame), level(5));
 }
 
@@ -157,7 +157,7 @@ fn planar_formats_arrive_as_decoded() {
         (e.bits, e.shift, e.chroma_shift, e.alpha),
         (8, 0, (1, 1), false)
     );
-    assert_eq!(e.siting, (Siting::Cosited, Siting::Centred));
+    assert_eq!(e.siting, (Siting::Cosited, Siting::Centered));
     let sizes: Vec<_> = frame.planes.iter().map(|p| (p.width, p.height)).collect();
     assert_eq!(sizes, [(320, 180), (160, 90), (160, 90)]);
     assert_eq!(frame.byte_size(), 320 * 180 * 3 / 2);

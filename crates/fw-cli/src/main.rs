@@ -334,7 +334,7 @@ fn play(
         let now = engine.playhead().as_f64();
         if now >= next_report {
             let status = engine.playback();
-            let (mean, worst) = summarise(&offsets);
+            let (mean, worst) = summarize(&offsets);
             println!(
                 "{now:7.2}s  shown {:3}  dropped {:3}  audio underruns {}  frame lateness mean {mean:5.1} ms, worst {worst:5.1} ms",
                 status.shown - last.shown,
@@ -358,7 +358,7 @@ fn play(
 }
 
 /// Mean and largest of a set of millisecond lateness values.
-fn summarise(offsets: &[f64]) -> (f64, f64) {
+fn summarize(offsets: &[f64]) -> (f64, f64) {
     if offsets.is_empty() {
         return (0.0, 0.0);
     }
@@ -510,7 +510,7 @@ fn example_timeline(ids: &mut RandomIds) -> Result<Document, String> {
     Ok(editor.doc().clone())
 }
 
-/// A smooth hue sweep fading to grey, with an alpha ramp at the bottom. Written
+/// A smooth hue sweep fading to gray, with an alpha ramp at the bottom. Written
 /// as a 16-bit sRGB PNG, so any banding in a render comes from the engine.
 fn example_image(width: u32, height: u32) -> RgbaImage {
     let mut img = RgbaImage::new(width, height, false);
@@ -523,8 +523,8 @@ fn example_image(width: u32, height: u32) -> RgbaImage {
                 let d = ((hue - offset).rem_euclid(6.0) - 3.0).abs();
                 (d - 1.0).clamp(0.0, 1.0)
             };
-            let grey = fx;
-            let mix = |c: f32| c + (grey - c) * fy;
+            let gray = fx;
+            let mix = |c: f32| c + (gray - c) * fy;
             let alpha = if fy > 0.9 {
                 1.0 - (fy - 0.9) * 10.0 * (1.0 - fx)
             } else {

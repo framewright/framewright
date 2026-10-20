@@ -1,6 +1,6 @@
 [package]
 name = "fw-core"
-description = "Framewright core types: ids, rational time, geometry, colour-space descriptors, hashing"
+description = "Framewright core types: ids, rational time, geometry, color-space descriptors, hashing"
 edition.workspace = true
 version.workspace = true
 publish.workspace = true

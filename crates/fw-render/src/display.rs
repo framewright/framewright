@@ -1,7 +1,7 @@
 //! Showing a rendered frame in a window: the display boundary (design §10).
 //!
 //! The frame is drawn straight from its texture inside the UI's own render
-//! pass, so nothing is copied. Pixels go from the frame's colour space to
+//! pass, so nothing is copied. Pixels go from the frame's color space to
 //! linear Rec.709, over a background, then are encoded for the window's
 //! surface. Exports never pass through here.
 //!
@@ -11,7 +11,7 @@ use fw_core::ColorSpace;
 
 use crate::GpuImage;
 
-/// How the window's surface expects colour.
+/// How the window's surface expects color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceEncoding {
     /// An `…Srgb` format: the hardware applies the sRGB curve.
@@ -73,7 +73,7 @@ pub struct Display {
     format: wgpu::TextureFormat,
     layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
-    /// One pipeline per colour space frames have arrived in.
+    /// One pipeline per color space frames have arrived in.
     pipelines: Vec<(ColorSpace, wgpu::RenderPipeline)>,
     uniforms: wgpu::Buffer,
     sampler: wgpu::Sampler,

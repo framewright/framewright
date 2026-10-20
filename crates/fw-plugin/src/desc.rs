@@ -1,4 +1,4 @@
-//! Node type descriptions: plain data, with no behaviour.
+//! Node type descriptions: plain data, with no behavior.
 
 use serde::Serialize;
 
@@ -18,7 +18,7 @@ pub const CLIP_TYPE: &str = "fw.clip";
 pub const OUTPUT_TYPE: &str = "fw.output";
 
 /// The type id of the Input node: inside a node's graph, what the node
-/// supplies (a clip's media). See [`crate::ImageBehaviour::source`].
+/// supplies (a clip's media). See [`crate::ImageBehavior::source`].
 pub const INPUT_TYPE: &str = "fw.input";
 
 /// Everything the engine and UI need to know about a node type without running it.
@@ -34,7 +34,7 @@ pub struct NodeTypeDesc {
     pub version: u32,
     /// Shown to users, e.g. `"Exposure"`.
     pub name: String,
-    /// Groups the type in the node library, e.g. `"Colour"`.
+    /// Groups the type in the node library, e.g. `"Color"`.
     pub category: String,
     pub inputs: Vec<PortDesc>,
     pub outputs: Vec<PortDesc>,
@@ -317,7 +317,7 @@ mod tests {
 
         let space = ParamDesc::choice(
             "space",
-            "Colour space",
+            "Color space",
             &[("srgb", "sRGB"), ("acescg", "ACEScg")],
             "srgb",
         );

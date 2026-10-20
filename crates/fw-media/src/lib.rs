@@ -1,11 +1,11 @@
 //! Reading and writing media files.
 //!
 //! Nothing else in Framewright touches file formats. Images come in as
-//! straight-alpha `f32` RGBA with the colour space the file declares, and go
+//! straight-alpha `f32` RGBA with the color space the file declares, and go
 //! out from premultiplied engine pixels.
 //!
 //! TODO: video and audio through a private FFmpeg build (design §12), RAW
-//! stills, ICC profiles and PNG colour chunks.
+//! stills, ICC profiles and PNG color chunks.
 
 mod audio;
 mod copies;
@@ -71,7 +71,7 @@ impl Format {
         }
     }
 
-    /// The colour space a file of this type is written in by default.
+    /// The color space a file of this type is written in by default.
     pub fn natural_space(self) -> ColorSpace {
         match self {
             Format::Png | Format::Jpeg => ColorSpace::SRGB,
@@ -211,7 +211,7 @@ pub fn read_image(path: &Path) -> Result<(RgbaImage, ColorSpace), MediaError> {
                 .map_err(|e| decode(e.to_string()))?;
             let space = exr_space(read.attributes.chromaticities);
             let mut image = read.layer_data.channel_data.pixels;
-            // EXR stores premultiplied colour; the engine's input contract is straight.
+            // EXR stores premultiplied color; the engine's input contract is straight.
             image.unpremultiply();
             Ok((image, space))
         }
@@ -264,7 +264,7 @@ pub fn write_exr(path: &Path, image: &RgbaImage, space: ColorSpace) -> Result<()
     publish(path, bytes.get_ref())
 }
 
-/// Writes straight-alpha PNG. Values are clamped to 0–1 and quantised.
+/// Writes straight-alpha PNG. Values are clamped to 0–1 and quantized.
 pub fn write_png(path: &Path, image: &RgbaImage, sixteen_bit: bool) -> Result<(), MediaError> {
     let encode = |message: String| MediaError::Encode {
         path: path.to_owned(),
@@ -277,7 +277,7 @@ pub fn write_png(path: &Path, image: &RgbaImage, sixteen_bit: bool) -> Result<()
         let data = image
             .pixels
             .iter()
-            .map(|v| quantise(*v, 65535.0) as u16)
+            .map(|v| quantize(*v, 65535.0) as u16)
             .collect();
         image::DynamicImage::ImageRgba16(
             image::ImageBuffer::from_raw(w, h, data).expect("sizes match"),
@@ -286,7 +286,7 @@ pub fn write_png(path: &Path, image: &RgbaImage, sixteen_bit: bool) -> Result<()
         let data = image
             .pixels
             .iter()
-            .map(|v| quantise(*v, 255.0) as u8)
+            .map(|v| quantize(*v, 255.0) as u8)
             .collect();
         image::DynamicImage::ImageRgba8(
             image::ImageBuffer::from_raw(w, h, data).expect("sizes match"),
@@ -299,7 +299,7 @@ pub fn write_png(path: &Path, image: &RgbaImage, sixteen_bit: bool) -> Result<()
     publish(path, bytes.get_ref())
 }
 
-fn quantise(v: f32, max: f32) -> f32 {
+fn quantize(v: f32, max: f32) -> f32 {
     (v.clamp(0.0, 1.0) * max).round()
 }
 

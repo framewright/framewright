@@ -1,4 +1,4 @@
-//! WGSL generation: colour conversions and fused kernels.
+//! WGSL generation: color conversions and fused kernels.
 
 use fw_core::color::{IDENTITY, conversion_matrix};
 use fw_core::{ColorSpace, Transfer};
@@ -20,7 +20,7 @@ fn transfer_fn(t: Transfer, encode: bool) -> Option<&'static str> {
     Some(name)
 }
 
-/// A per-pixel operation converting premultiplied pixels between colour spaces,
+/// A per-pixel operation converting premultiplied pixels between color spaces,
 /// or `None` when the spaces are the same.
 pub fn conversion(from: ColorSpace, to: ColorSpace) -> Option<PixelOp> {
     if from == to {
@@ -31,7 +31,7 @@ pub fn conversion(from: ColorSpace, to: ColorSpace) -> Option<PixelOp> {
     let encode = transfer_fn(to.transfer, true);
     let mut params = vec![];
     let mut body = String::new();
-    // Transfer curves apply to unpremultiplied colour; a matrix alone works on premultiplied.
+    // Transfer curves apply to unpremultiplied color; a matrix alone works on premultiplied.
     let curves = decode.is_some() || encode.is_some();
     body.push_str(if curves {
         "var rgb = fw_unpremultiply(c).rgb;\n"
@@ -61,7 +61,7 @@ pub fn conversion(from: ColorSpace, to: ColorSpace) -> Option<PixelOp> {
     })
 }
 
-/// WGSL for shaders outside plans, such as the viewer's: the colour helpers
+/// WGSL for shaders outside plans, such as the viewer's: the color helpers
 /// and `fn <name>(c: vec4<f32>) -> vec4<f32>`, converting premultiplied
 /// pixels from `from` to `to`.
 pub fn conversion_function(name: &str, from: ColorSpace, to: ColorSpace) -> String {

@@ -20,7 +20,7 @@ pub enum ValueError {
     NotAnimatable,
 }
 
-/// A colour parameter. Values are unpremultiplied and may exceed 1.0.
+/// A color parameter. Values are unpremultiplied and may exceed 1.0.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Color {

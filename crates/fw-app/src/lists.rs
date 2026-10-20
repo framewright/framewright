@@ -57,7 +57,7 @@ pub fn media(ui: &mut Ui, media: &[MediaSummary]) {
                     medium(12.0),
                     t::TEXT,
                 );
-                let (meta, colour) = match (&item.picture, &item.error) {
+                let (meta, color) = match (&item.picture, &item.error) {
                     (_, Some(error)) => (error.clone(), t::ACCENT),
                     (Some(p), None) => (describe(item, p), t::TEXT3),
                     (None, None) => ("Sound only".into(), t::TEXT3),
@@ -67,7 +67,7 @@ pub fn media(ui: &mut Ui, media: &[MediaSummary]) {
                     Align2::LEFT_CENTER,
                     meta,
                     sans(11.0),
-                    colour,
+                    color,
                 );
                 response.on_hover_text(&item.path);
             }

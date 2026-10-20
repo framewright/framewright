@@ -60,7 +60,7 @@ const COUNT_VFR: Recipe = Recipe {
 };
 
 /// Ordinary 23.976 fps H.264 4:2:0 with long GOPs and B-frames, tagged
-/// Rec.709, plus a 440 Hz tone. For seeking, colour handling and audio.
+/// Rec.709, plus a 440 Hz tone. For seeking, color handling and audio.
 const H264: Recipe = Recipe {
     name: "testsrc-h264.mp4",
     args: &[

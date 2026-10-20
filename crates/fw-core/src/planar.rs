@@ -55,10 +55,10 @@ pub enum Siting {
     /// On the first luma sample of each group (MPEG-2 and H.264 horizontally).
     Cosited,
     /// Midway between the group's luma samples (JPEG, and most vertically).
-    Centred,
+    Centered,
 }
 
-/// How a [`PlanarImage`]'s codes become colour.
+/// How a [`PlanarImage`]'s codes become color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlanarEncoding {
     pub model: PlanarModel,
@@ -243,7 +243,7 @@ impl PlanarEncoding {
         let s = (1u32 << shift) as f32;
         let first = match siting {
             Siting::Cosited => 0.0,
-            Siting::Centred => (s - 1.0) / 2.0,
+            Siting::Centered => (s - 1.0) / 2.0,
         };
         let u = ((p as f32 - first) / s).max(0.0);
         let i = (u.floor() as u32).min(size - 1);
@@ -261,7 +261,7 @@ mod tests {
             bits,
             shift,
             chroma_shift: (1, 1),
-            siting: (Siting::Cosited, Siting::Centred),
+            siting: (Siting::Cosited, Siting::Centered),
             alpha: false,
         }
     }
@@ -299,10 +299,10 @@ mod tests {
         // Co-sited: luma 2 sits on chroma 1; luma 3 is halfway to chroma 2.
         assert_eq!(e.chroma_taps(2, 1, Siting::Cosited, 8), (0.0, 1, 2));
         assert_eq!(e.chroma_taps(3, 1, Siting::Cosited, 8), (0.5, 1, 2));
-        // Centred: chroma 0 sits at luma 0.5.
-        assert_eq!(e.chroma_taps(0, 1, Siting::Centred, 8), (0.0, 0, 1));
-        assert_eq!(e.chroma_taps(1, 1, Siting::Centred, 8), (0.25, 0, 1));
+        // Centered: chroma 0 sits at luma 0.5.
+        assert_eq!(e.chroma_taps(0, 1, Siting::Centered, 8), (0.0, 0, 1));
+        assert_eq!(e.chroma_taps(1, 1, Siting::Centered, 8), (0.25, 0, 1));
         // The last samples clamp at the edge.
-        assert_eq!(e.chroma_taps(15, 1, Siting::Centred, 8), (0.25, 7, 7));
+        assert_eq!(e.chroma_taps(15, 1, Siting::Centered, 8), (0.25, 7, 7));
     }
 }

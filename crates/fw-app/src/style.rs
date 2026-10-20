@@ -1,11 +1,11 @@
-//! The Studio design system on egui: colour tokens, fonts and visuals
+//! The Studio design system on egui: color tokens, fonts and visuals
 //! (design §3.4).
 
 use std::sync::Arc;
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle};
 
-/// Colour tokens, sRGB.
+/// Color tokens, sRGB.
 pub mod tokens {
     use egui::Color32;
 
@@ -55,10 +55,10 @@ pub mod tokens {
     pub const WIRE: Color32 = rgb(0x55555d);
     pub const PORT_IMAGE: Color32 = rgb(0x8a8a92);
     pub const PORT_MASK: Color32 = rgb(0x6f8fc4);
-    /// Node categories' colours.
+    /// Node categories' colors.
     pub const NODE_SOURCE: Color32 = rgb(0x6f8bb4);
     pub const NODE_FILTER: Color32 = rgb(0x7d7d86);
-    pub const NODE_COLOUR: Color32 = rgb(0xb58e5c);
+    pub const NODE_COLOR: Color32 = rgb(0xb58e5c);
     pub const NODE_CONTAINER: Color32 = rgb(0x8f83c2);
     pub const NODE_OUTPUT: Color32 = rgb(0xb47a84);
 }

@@ -11,13 +11,13 @@ pub mod kernel;
 pub mod registry;
 pub mod value;
 
-pub use audio::{AudioBehaviour, AudioBlock, AudioProcessor};
+pub use audio::{AudioBehavior, AudioBlock, AudioProcessor};
 pub use desc::{
     CLIP_TYPE, ChoiceOption, ContainerKind, GRAPH_TYPE, HandleKind, INPUT_TYPE, NodeTypeDesc,
     OUTPUT_TYPE, ParamDesc, ParamKind, PortDesc, PortType, TIMELINE_TYPE, Unit,
 };
 pub use image::{
-    ImageBehaviour, ImageHandle, ImageInfo, NodeError, PixelOp, PlanBuilder, Quality, Request,
+    ImageBehavior, ImageHandle, ImageInfo, NodeError, PixelOp, PlanBuilder, Quality, Request,
     ResolvedParams, SpaceNeed,
 };
 pub use registry::{MigrateFn, NodeType, Registry, RegistryError};

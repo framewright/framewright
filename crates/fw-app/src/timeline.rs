@@ -17,7 +17,7 @@ const HEADER_WIDTH: f32 = 116.0;
 const RULER_HEIGHT: f32 = 26.0;
 const VIDEO_HEIGHT: f32 = 50.0;
 const AUDIO_HEIGHT: f32 = 44.0;
-/// Labelled ticks on the ruler are at least this far apart.
+/// Labeled ticks on the ruler are at least this far apart.
 const LABEL_SPACING: f32 = 90.0;
 
 pub struct TimelineView {
@@ -442,7 +442,7 @@ fn ruler_ui(
         .clone()
         .find(|s| s * frame_points >= LABEL_SPACING as f64)
         .unwrap_or(3600.0 * fps);
-    // The finest step that divides the labelled one and isn't crowded.
+    // The finest step that divides the labeled one and isn't crowded.
     let minor = steps.find(|s| *s < step && (step / s).fract() == 0.0 && s * frame_points >= 8.0);
     let first = (view.seconds(ruler.left(), lanes).max(0.0) * rate.as_f64()).floor();
     let last = view.seconds(ruler.right(), lanes) * rate.as_f64();

@@ -33,7 +33,7 @@ pub struct Picture {
     pub rate: Option<Time>,
 }
 
-pub(crate) fn summarise_media(doc: &Document, media: &ProjectMedia) -> Vec<MediaSummary> {
+pub(crate) fn summarize_media(doc: &Document, media: &ProjectMedia) -> Vec<MediaSummary> {
     use fw_compile::{FrameTimes, MediaResolver};
     let mut summaries: Vec<MediaSummary> = vec![];
     let mut nodes: Vec<_> = doc.nodes().collect();

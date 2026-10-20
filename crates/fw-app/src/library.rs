@@ -181,7 +181,7 @@ fn row(ui: &mut Ui, desc: &NodeTypeDesc, highlighted: bool) -> bool {
         painter.rect_filled(rect, CornerRadius::same(3), t::MENU_ON);
     }
     let dot = Rect::from_center_size(pos2(rect.left() + 12.0, rect.center().y), vec2(6.0, 6.0));
-    painter.rect_filled(dot, CornerRadius::same(3), category_colour(&desc.category));
+    painter.rect_filled(dot, CornerRadius::same(3), category_color(&desc.category));
     painter.text(
         pos2(rect.left() + 24.0, rect.center().y),
         Align2::LEFT_CENTER,
@@ -192,11 +192,11 @@ fn row(ui: &mut Ui, desc: &NodeTypeDesc, highlighted: bool) -> bool {
     response.clicked()
 }
 
-/// The colour that marks a category, in the list and on nodes.
-pub fn category_colour(category: &str) -> egui::Color32 {
+/// The color that marks a category, in the list and on nodes.
+pub fn category_color(category: &str) -> egui::Color32 {
     match category {
         "Sources" => t::NODE_SOURCE,
-        "Colour" => t::NODE_COLOUR,
+        "Color" => t::NODE_COLOR,
         "Outputs" => t::NODE_OUTPUT,
         "Containers" => t::NODE_CONTAINER,
         _ => t::NODE_FILTER,

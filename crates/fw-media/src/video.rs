@@ -28,7 +28,7 @@ pub struct VideoInfo {
     pub width: u32,
     pub height: u32,
     pub frames: FrameTimes,
-    /// The colour space the stream is tagged with, or the usual assumption
+    /// The color space the stream is tagged with, or the usual assumption
     /// for untagged video (Rec.709 primaries, BT.1886 display gamma).
     pub space: ColorSpace,
     pub has_alpha: bool,
@@ -257,7 +257,7 @@ fn tagged_space(
     let transfer = match trc {
         ffi::AVCOL_TRC_IEC61966_2_1 => Transfer::Srgb,
         ffi::AVCOL_TRC_LINEAR => Transfer::Linear,
-        // TODO: PQ and HLG once the colour core has them.
+        // TODO: PQ and HLG once the color core has them.
         _ => Transfer::Gamma24,
     };
     ColorSpace::new(primaries, transfer)
@@ -714,7 +714,7 @@ fn native_layout(format: i32) -> Option<NativeLayout> {
     })
 }
 
-/// How the frame's codes become colour, from its tags.
+/// How the frame's codes become color, from its tags.
 fn encoding_of(frame: &AVFrame, layout: &NativeLayout, shift: u32) -> PlanarEncoding {
     let model = if layout.rgb {
         PlanarModel::Rgb
@@ -735,13 +735,13 @@ fn encoding_of(frame: &AVFrame, layout: &NativeLayout, shift: u32) -> PlanarEnco
         PlanarModel::Yuv { matrix, range }
     };
     let siting = match frame.chroma_location {
-        ffi::AVCHROMA_LOC_CENTER => (Siting::Centred, Siting::Centred),
+        ffi::AVCHROMA_LOC_CENTER => (Siting::Centered, Siting::Centered),
         ffi::AVCHROMA_LOC_TOPLEFT => (Siting::Cosited, Siting::Cosited),
-        ffi::AVCHROMA_LOC_TOP => (Siting::Centred, Siting::Cosited),
-        // TODO: bottom siting (rare); treated as centred vertically.
-        ffi::AVCHROMA_LOC_BOTTOM => (Siting::Centred, Siting::Centred),
+        ffi::AVCHROMA_LOC_TOP => (Siting::Centered, Siting::Cosited),
+        // TODO: bottom siting (rare); treated as centered vertically.
+        ffi::AVCHROMA_LOC_BOTTOM => (Siting::Centered, Siting::Centered),
         // Left, bottom-left and untagged: the MPEG-2 / H.264 / HEVC default.
-        _ => (Siting::Cosited, Siting::Centred),
+        _ => (Siting::Cosited, Siting::Centered),
     };
     PlanarEncoding {
         model,

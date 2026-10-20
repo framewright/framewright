@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use fw_core::{NodeId, Time};
 use fw_doc::{Document, KeyTime, Node, TrackKind};
-use fw_plugin::{AudioBehaviour, MediaRef, ParamValue, Registry};
+use fw_plugin::{AudioBehavior, MediaRef, ParamValue, Registry};
 
 use crate::{CompileError, MediaResolver};
 
@@ -29,8 +29,8 @@ pub struct Voice {
     pub end: i64,
     /// The source sample heard at `start`.
     pub source_start: i64,
-    pub behaviour: Arc<dyn AudioBehaviour>,
-    /// Values for `behaviour.params()`, in order.
+    pub behavior: Arc<dyn AudioBehavior>,
+    /// Values for `behavior.params()`, in order.
     /// TODO: automation, resolved per block (design §4.4). Constant for now.
     pub params: Vec<f32>,
 }
@@ -88,7 +88,7 @@ pub fn compile_audio(
                 format!("node type {} isn't registered", known.type_id),
             )
         })?;
-        let behaviour = ty
+        let behavior = ty
             .audio
             .clone()
             .ok_or_else(|| fail(*clip, format!("{} makes no sound", ty.desc.name)))?;
@@ -117,7 +117,7 @@ pub fn compile_audio(
             length: Some(placement.duration),
         };
         let mut params = vec![];
-        for id in behaviour.params() {
+        for id in behavior.params() {
             let desc = ty
                 .desc
                 .param(&id)
@@ -137,7 +137,7 @@ pub fn compile_audio(
             start: to_samples(*clip, placement.start)?,
             end: to_samples(*clip, placement.end())?,
             source_start: to_samples(*clip, placement.source_in)?,
-            behaviour,
+            behavior,
             params,
         });
     }

@@ -320,7 +320,7 @@ fn save_and_load_files() {
 }
 
 #[test]
-fn restoring_an_unknown_node_survives_serialisation() {
+fn restoring_an_unknown_node_survives_serialization() {
     // The path a crash-recovery journal takes: an inverse holding unknown bytes,
     // written out as JSON and read back.
     let text = to_json(sample(full_registry()).doc());

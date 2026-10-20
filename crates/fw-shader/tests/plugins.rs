@@ -9,7 +9,7 @@ const TINT: &str = r#"
 id = "test.tint"
 version = 1
 name = "Tint"
-category = "Colour"
+category = "Color"
 
 [[inputs]]
 id = "image"
@@ -20,9 +20,9 @@ id = "over"
 name = "Over"
 
 [[params]]
-id = "colour"
-name = "Colour"
-type = "colour"
+id = "color"
+name = "Color"
+type = "color"
 default = [1, 0.5, 0.25]
 
 [[params]]
@@ -32,15 +32,15 @@ type = "choice"
 options = [{ id = "mix", name = "Mix" }, { id = "add", name = "Add" }]
 
 [[params]]
-id = "centre"
-name = "Centre"
+id = "center"
+name = "Center"
 type = "vec2"
 "#;
 
-const TINT_SHADER: &str = "let d = distance(pos, centre) / max(frame.z - frame.x, 1.0);
+const TINT_SHADER: &str = "let d = distance(pos, center) / max(frame.z - frame.x, 1.0);
 var out = mix(c, over, d);
 if (mode == 1) {
-    out = vec4<f32>(out.rgb + colour.rgb * out.a, out.a);
+    out = vec4<f32>(out.rgb + color.rgb * out.a, out.a);
 }
 return out;
 ";
@@ -69,7 +69,7 @@ fn a_broken_shader_still_registers_and_says_where_it_went_wrong() {
     assert!(problem.contains("nonsense"), "{problem}");
 
     // Type errors are caught too, not just names, and read as WGSL types.
-    let wrong_type = plugin(TINT, "let a = c.rgb;\nreturn a * colour;\n", "shader.wgsl").unwrap();
+    let wrong_type = plugin(TINT, "let a = c.rgb;\nreturn a * color;\n", "shader.wgsl").unwrap();
     let problem = wrong_type.problem.expect("vec3 times vec4");
     assert_eq!(
         problem,

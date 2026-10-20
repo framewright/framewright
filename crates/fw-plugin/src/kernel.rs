@@ -21,7 +21,7 @@ fn fw_mat3(base: u32) -> mat3x3<f32> {
 }
 "#;
 
-/// Colour helpers every kernel can use. Out-of-range branches of `select` may
+/// Color helpers every kernel can use. Out-of-range branches of `select` may
 /// compute NaN (e.g. `pow` of a negative), but `select` never returns them.
 pub const HELPERS: &str = r#"
 

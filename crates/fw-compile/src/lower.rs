@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use fw_core::{ColorSpace, ContentHash, KeyHasher, NodeId, Rect, Time};
 use fw_doc::{Contents, Document, Graph, KeyTime, Node, PortRef, Timeline, TrackKind};
 use fw_plugin::{
-    INPUT_TYPE, ImageBehaviour, ImageHandle, ImageInfo, MediaRef, NodeError, OUTPUT_TYPE, PixelOp,
+    INPUT_TYPE, ImageBehavior, ImageHandle, ImageInfo, MediaRef, NodeError, OUTPUT_TYPE, PixelOp,
     PlanBuilder, Quality, Registry, Request, ResolvedParams, SpaceNeed,
 };
 
@@ -343,8 +343,8 @@ impl Lowering<'_> {
             .registry
             .get(&known.type_id)
             .ok_or_else(|| fail(format!("node type {} isn't registered", known.type_id)))?;
-        let behaviour = ty.image.clone();
-        if behaviour.is_none() && graph.is_none() {
+        let behavior = ty.image.clone();
+        if behavior.is_none() && graph.is_none() {
             return Err(fail(format!("{} doesn't produce images", ty.desc.name)));
         }
 
@@ -365,12 +365,12 @@ impl Lowering<'_> {
             let contents = self.contents(
                 &node_path,
                 graph,
-                behaviour.as_deref(),
+                behavior.as_deref(),
                 &params,
                 request,
                 clock,
             )?;
-            let Some(behaviour) = behaviour else {
+            let Some(behavior) = behavior else {
                 // A plain Graph container delivers what its graph does.
                 self.done.insert((id, request_key), contents);
                 return Ok(contents);
@@ -379,7 +379,7 @@ impl Lowering<'_> {
                 id,
                 &known.name,
                 ty,
-                behaviour.as_ref(),
+                behavior.as_ref(),
                 &params,
                 request,
                 &[contents],
@@ -388,8 +388,8 @@ impl Lowering<'_> {
                 clock,
             );
         }
-        let behaviour = behaviour.expect("checked above");
-        let input_requests = behaviour.requirements(&params, request, ty.desc.inputs.len());
+        let behavior = behavior.expect("checked above");
+        let input_requests = behavior.requirements(&params, request, ty.desc.inputs.len());
         let mut inputs = vec![];
         for (index, (port, input_request)) in ty.desc.inputs.iter().zip(&input_requests).enumerate()
         {
@@ -399,7 +399,7 @@ impl Lowering<'_> {
                 .ok_or_else(|| fail(format!("input {:?} is not connected", port.name)))?
                 .clone();
             let image = self.node(path, source.node, input_request, clock)?;
-            let wanted = match behaviour.input_space(&params, index) {
+            let wanted = match behavior.input_space(&params, index) {
                 SpaceNeed::Working => Some(self.options.working_space),
                 SpaceNeed::Exact(space) => Some(space),
                 // Inside a graph held by another node (a clip's), that node
@@ -416,7 +416,7 @@ impl Lowering<'_> {
             id,
             &known.name,
             ty,
-            behaviour.as_ref(),
+            behavior.as_ref(),
             &params,
             request,
             &inputs,
@@ -432,7 +432,7 @@ impl Lowering<'_> {
         &mut self,
         path: &[NodeId],
         graph: &Graph,
-        behaviour: Option<&dyn ImageBehaviour>,
+        behavior: Option<&dyn ImageBehavior>,
         params: &ResolvedParams,
         request: &Request,
         clock: Clock,
@@ -459,8 +459,8 @@ impl Lowering<'_> {
                 ));
             }
         };
-        let source = match behaviour {
-            Some(behaviour) if !of_type(INPUT_TYPE).is_empty() => {
+        let source = match behavior {
+            Some(behavior) if !of_type(INPUT_TYPE).is_empty() => {
                 let name = self.doc.node(container).map_or("", Node::name).to_owned();
                 let mut key = KeyHasher::new("fw.source");
                 key.node_id(container).hash(&request_key(request));
@@ -477,7 +477,7 @@ impl Lowering<'_> {
                     bad_handle: None,
                     source_time: clock.source,
                 };
-                let result = behaviour.source(params, request, &mut builder);
+                let result = behavior.source(params, request, &mut builder);
                 let bad = builder.bad_handle;
                 let source = result.map_err(|NodeError(m)| self.node_error(container, m))?;
                 if let Some(h) = bad.or(source.filter(|h| h.0 as usize >= self.ops.len())) {
@@ -501,7 +501,7 @@ impl Lowering<'_> {
         id: NodeId,
         name: &str,
         ty: &fw_plugin::NodeType,
-        behaviour: &dyn ImageBehaviour,
+        behavior: &dyn ImageBehavior,
         params: &ResolvedParams,
         request: &Request,
         inputs: &[ImageHandle],
@@ -543,7 +543,7 @@ impl Lowering<'_> {
             bad_handle: None,
             source_time: clock.source,
         };
-        let result = behaviour.emit(params, request, inputs, &mut builder);
+        let result = behavior.emit(params, request, inputs, &mut builder);
         let bad_handle = builder.bad_handle;
         let output = result.map_err(|NodeError(message)| fail(message))?;
         if let Some(h) = bad_handle.or((output.0 as usize >= self.ops.len()).then_some(output)) {

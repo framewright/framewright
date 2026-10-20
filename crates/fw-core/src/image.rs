@@ -52,7 +52,7 @@ impl RgbaImage {
         }
     }
 
-    /// Divides colour by alpha. Fully transparent pixels become black.
+    /// Divides color by alpha. Fully transparent pixels become black.
     pub fn unpremultiply(&mut self) {
         if self.premultiplied {
             for px in self.pixels.chunks_exact_mut(4) {

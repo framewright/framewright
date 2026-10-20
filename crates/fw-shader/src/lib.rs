@@ -4,13 +4,13 @@
 //! The WGSL is the body of a per-pixel function, the same as a built-in
 //! [`fw_plugin::PixelOp`]'s. It sees `c` (the first input's premultiplied
 //! pixel), the other inputs by their port ids, each parameter by its id,
-//! `pos` (the pixel's centre in canvas units) and `frame` (the image's
-//! region, `min.xy, max.xy`), and returns a `vec4<f32>`. Colours arrive
+//! `pos` (the pixel's center in canvas units) and `frame` (the image's
+//! region, `min.xy, max.xy`), and returns a `vec4<f32>`. Colors arrive
 //! unpremultiplied in the space the node works in, and a choice arrives as
 //! the index of the option picked.
 //!
 //! TODO: helper functions outside the body, operations that read
-//! neighbouring pixels, and a time seed for noise.
+//! neighboring pixels, and a time seed for noise.
 
 mod manifest;
 mod node;
@@ -38,7 +38,7 @@ pub struct Plugin {
 pub fn plugin(manifest: &str, shader: &str, shader_file: &str) -> Result<Plugin, String> {
     let desc = Manifest::parse(manifest)?.to_desc()?;
     let problem = validate(&desc, shader, shader_file).err();
-    let behaviour = ShaderNode {
+    let behavior = ShaderNode {
         label: desc.name.to_lowercase(),
         params: desc.params.clone(),
         wgsl: Arc::from(op_body(&desc, shader).0),
@@ -47,7 +47,7 @@ pub fn plugin(manifest: &str, shader: &str, shader_file: &str) -> Result<Plugin,
     // Editing either file changes every cache key the node is part of.
     let implementation = format!("{manifest}\0{shader}");
     Ok(Plugin {
-        node_type: NodeType::new(desc).with_image(behaviour, &implementation),
+        node_type: NodeType::new(desc).with_image(behavior, &implementation),
         problem,
     })
 }

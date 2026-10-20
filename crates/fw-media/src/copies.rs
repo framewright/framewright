@@ -286,7 +286,7 @@ impl Scaler {
             // tent over the footprint.
             let flags = ffi::SWS_BILINEAR | ffi::SWS_ACCURATE_RND | ffi::SWS_BITEXACT;
             // Where chroma sits, in 1/256 of a luma sample. swscale otherwise
-            // assumes its own and shifts colour at edges. The copy keeps the
+            // assumes its own and shifts color at edges. The copy keeps the
             // source's horizontal siting; 4:2:2 has no vertical subsampling.
             let (mut x, mut y) = (0, 128);
             if !tags.rgb && tags.chroma != ffi::AVCHROMA_LOC_UNSPECIFIED {
@@ -331,8 +331,8 @@ impl Scaler {
     }
 }
 
-/// The colour tags a copy carries: the source's, made explicit where the
-/// source left them to be guessed, so the copy decodes to the same colours.
+/// The color tags a copy carries: the source's, made explicit where the
+/// source left them to be guessed, so the copy decodes to the same colors.
 struct Tags {
     rgb: bool,
     /// The copy's horizontal chroma position, in 1/256 of a luma sample.
@@ -373,13 +373,13 @@ impl Tags {
             ffi::AVCHROMA_LOC_UNSPECIFIED => ffi::AVCHROMA_LOC_LEFT,
             loc => loc,
         };
-        let centred = matches!(
+        let centered = matches!(
             chroma,
             ffi::AVCHROMA_LOC_CENTER | ffi::AVCHROMA_LOC_TOP | ffi::AVCHROMA_LOC_BOTTOM
         );
         Tags {
             rgb,
-            copy_x: if centred { 128 } else { 0 },
+            copy_x: if centered { 128 } else { 0 },
             matrix,
             range,
             primaries: frame.color_primaries,
@@ -516,7 +516,7 @@ pub struct EditingCopies {
 #[derive(Default)]
 struct Shared {
     state: std::sync::Mutex<State>,
-    /// Signalled when a job is queued, a job finishes, or work should stop.
+    /// Signaled when a job is queued, a job finishes, or work should stop.
     changed: std::sync::Condvar,
     stop: AtomicBool,
 }

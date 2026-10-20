@@ -73,14 +73,14 @@ impl Time {
     }
 
     /// The index of the frame containing this time at `rate` frames per second,
-    /// rounding towards negative infinity.
+    /// rounding toward negative infinity.
     pub fn frame_index(self, rate: Time) -> Result<i64, TimeError> {
         let frames = self.checked_mul(rate)?;
         Ok(frames.num.div_euclid(frames.den))
     }
 
     /// The index of the sample containing this time at `sample_rate` Hz,
-    /// rounding towards negative infinity.
+    /// rounding toward negative infinity.
     pub fn sample_index(self, sample_rate: u32) -> Result<i64, TimeError> {
         self.frame_index(Time::from_seconds(sample_rate as i64))
     }
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn reduces_and_normalises_sign() {
+    fn reduces_and_normalizes_sign() {
         assert_eq!(Time::new(6, -4).unwrap(), t("-3/2"));
         assert_eq!(Time::new(0, -7).unwrap(), Time::ZERO);
         assert_eq!(Time::new(1, 0), Err(TimeError::ZeroDenominator));
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn serialises_as_string() {
+    fn serializes_as_string() {
         assert_eq!(serde_json::to_string(&t("1.5")).unwrap(), "\"3/2\"");
         assert_eq!(serde_json::from_str::<Time>("\"3/2\"").unwrap(), t("1.5"));
     }

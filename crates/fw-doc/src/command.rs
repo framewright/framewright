@@ -1,6 +1,6 @@
 //! Commands: every edit to a document is one of these.
 //!
-//! Commands are plain serialisable data, so the UI, scripts, the command
+//! Commands are plain serializable data, so the UI, scripts, the command
 //! journal and tests all drive the document the same way. Applying a command
 //! returns its inverse, which is how undo works.
 

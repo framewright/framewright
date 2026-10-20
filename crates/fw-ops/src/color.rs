@@ -1,8 +1,8 @@
-//! Colour-space choices offered by nodes.
+//! Color-space choices offered by nodes.
 
 use fw_core::ColorSpace;
 
-/// The choice ids and labels for a colour-space parameter. `"auto"` means
+/// The choice ids and labels for a color-space parameter. `"auto"` means
 /// "whatever the file or delivery says" and is resolved by the node.
 pub const SPACE_CHOICES: [(&str, &str); 6] = [
     ("auto", "Auto"),
@@ -13,7 +13,7 @@ pub const SPACE_CHOICES: [(&str, &str); 6] = [
     ("rec709_display", "Rec.709 (2.4)"),
 ];
 
-/// The colour space for a choice id, or `None` for `"auto"`.
+/// The color space for a choice id, or `None` for `"auto"`.
 pub fn space_from_choice(id: &str) -> Option<ColorSpace> {
     match id {
         "srgb" => Some(ColorSpace::SRGB),

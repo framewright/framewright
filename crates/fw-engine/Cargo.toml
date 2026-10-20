@@ -1,6 +1,6 @@
 [package]
 name = "fw-engine"
-description = "Framewright's engine as one object: a project open for editing, driven by serialisable requests"
+description = "Framewright's engine as one object: a project open for editing, driven by serializable requests"
 edition.workspace = true
 version.workspace = true
 publish.workspace = true

@@ -1,6 +1,6 @@
 //! Runs compiled plans on the GPU.
 //!
-//! Images live in `Rgba16Float` textures, premultiplied, in whatever colour
+//! Images live in `Rgba16Float` textures, premultiplied, in whatever color
 //! space the plan says. Plan outputs and decoded files are kept in a RAM
 //! cache by content key, so unchanged work is never redone.
 //!

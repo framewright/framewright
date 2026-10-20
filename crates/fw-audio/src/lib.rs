@@ -118,7 +118,7 @@ impl AudioEngine {
             let ring_start = from.max(v.start);
             let (ring, samples) =
                 rtrb::RingBuffer::new(self.rate as usize * CHANNELS * RING_SECONDS);
-            let mut processor = v.behaviour.create();
+            let mut processor = v.behavior.create();
             processor.prepare(self.rate, self.max_frames);
             voices.push(RtVoice {
                 start: v.start,

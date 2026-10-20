@@ -135,7 +135,7 @@ impl Gpu {
         adapter: &wgpu::Adapter,
         limits: &wgpu::Limits,
     ) -> Result<Option<Gpu>, RenderError> {
-        // P010's planes are viewed as 16-bit normalised textures.
+        // P010's planes are viewed as 16-bit normalized textures.
         let features = adapter.features()
             & (wgpu::Features::TEXTURE_FORMAT_NV12
                 | wgpu::Features::TEXTURE_FORMAT_P010

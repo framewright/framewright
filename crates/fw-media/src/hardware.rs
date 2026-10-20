@@ -54,7 +54,7 @@ pub const GPU_BIAS: f64 = 1.25;
 const CALIBRATION_FRAMES: u64 = 24;
 
 /// Whether hardware decoding taking `hardware` beats software taking
-/// `software`, with the bias towards the GPU.
+/// `software`, with the bias toward the GPU.
 pub fn prefers_hardware(hardware: std::time::Duration, software: std::time::Duration) -> bool {
     hardware.as_secs_f64() <= software.as_secs_f64() * GPU_BIAS
 }
@@ -72,7 +72,7 @@ unsafe impl Send for HardwareDevice {}
 unsafe impl Sync for HardwareDevice {}
 
 /// The FFmpeg context of each device in use, by `VkDevice`. Queues need
-/// their submits serialised, and FFmpeg's locks are per context, so every
+/// their submits serialized, and FFmpeg's locks are per context, so every
 /// decoder on a device must share one.
 static DEVICES: Mutex<Vec<(u64, std::sync::Weak<HardwareDevice>)>> = Mutex::new(Vec::new());
 
@@ -424,7 +424,7 @@ impl VulkanFrame {
 
 impl HardwareFrame for VulkanFrame {
     /// Under the frame's lock: after decoding (semaphore value `v`), move
-    /// the image to a shader-readable layout (signalling `v + 1`), and
+    /// the image to a shader-readable layout (signaling `v + 1`), and
     /// reserve `v + 2` for the reader. The lock isn't held after, so the
     /// decoder can use the frame as a reference meanwhile; its own work on
     /// the frame waits for `v + 2` on the GPU.

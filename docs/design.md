@@ -20,7 +20,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Extensibility is a first-class requirement.
 - **[Decided]** A polished, professional UI early on, because design decisions happen by using the app.
 
-**[Decided] Non-goals (for now):** 3D modelling (that's Blender's job), collaboration and cloud features, and matching Resolve or Photoshop feature for feature. These are "not now", not "never": the design must not rule any of them out. For example, stable IDs plus a command log keep real-time collaboration possible later.
+**[Decided] Non-goals (for now):** 3D modeling (that's Blender's job), collaboration and cloud features, and matching Resolve or Photoshop feature for feature. These are "not now", not "never": the design must not rule any of them out. For example, stable IDs plus a command log keep real-time collaboration possible later.
 
 ## 2. Stress scenarios
 
@@ -62,7 +62,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Inside a nested context, workspaces that don't apply are hidden. For example, Library and Export aren't shown inside a clip, because the result flows back to the parent.
 - **[Decided]** The navigation stack is **UI state**, not document state, so it never touches undo or saving. The back control always names its destination ("← Main Timeline"), because nesting can be deep.
 - **[Open]** Tracked "follow motion" strokes are a large feature. Design for them now, and build them later.
-- **[Proposed]** (step 4 plan) **Open in Compose.** A clip on the Edit page offers Open in Compose: the clip's context menu, the Clip menu, Enter, a double-click, or Compose in the workspace bar with the clip selected. Every clip already holds its graph (§4), so opening only changes page and edits nothing. The Compose page shows the clip's graph, with "← Main Timeline" to go back. The viewer shows the timeline at the playhead, including the clip's graph. On the timeline, a clip whose graph does more than pass its media through shows a graph badge. TODO: viewing one node's output.
+- **[Decided]** (from step 4) **Open in Compose.** A clip on the Edit page offers Open in Compose: the clip's context menu, the Clip menu, Enter, a double-click, or Compose in the workspace bar with the clip selected. Every clip already holds its graph (§4), so opening only changes page and edits nothing. The Compose page shows the clip's graph, with "← Main Timeline" to go back. The viewer shows the timeline at the playhead, including the clip's graph. On the timeline, a clip whose graph does more than pass its media through shows a graph badge. TODO: viewing one node's output.
 
 ### 3.3 Naming rules
 
@@ -71,9 +71,9 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 
 ### 3.4 Visual direction
 
-- **[Decided]** The "Studio" direction: Resolve-like fixed pages with a workspace bar along the bottom, IBM Plex Sans and Mono, charcoal greys and a single amber accent (`#e8a33d`).
+- **[Decided]** The "Studio" direction: Resolve-like fixed pages with a workspace bar along the bottom, IBM Plex Sans and Mono, charcoal grays and a single amber accent (`#e8a33d`).
 - **[Decided]** Every screen uses one control vocabulary: label, slider with a thin handle, monospaced value field, keyframe diamond, and collapsible chevron sections.
-- **[Decided]** Panels stay edge to edge with no boxes inside them, and colour is used only where it carries meaning (selection, playhead, data).
+- **[Decided]** Panels stay edge to edge with no boxes inside them, and color is used only where it carries meaning (selection, playhead, data).
 - **[Decided]** The current Grade layout is good enough for now; two alternatives were tried and rejected.
 - **[Decided]** Fixed page layouts are the default, built on a docking system so users can save their own arrangements.
 
@@ -86,23 +86,23 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Diffing two plans gives exactly which time ranges to re-render.
   - The old prototype proved this works.
 - **[Decided]** **Definitions vs instances.** A container is either inline (owned by its parent) or a shared definition referenced from many places. It acts like a function with published parameters. Reference cycles are rejected when the edit is made.
-- **[Decided]** **Context flows down, results flow up.** Each container boundary transforms time (offset, speed, retime curve), space (each container has its own canvas, and placement is a transform rather than a resample), quality (proxy level, region of interest) and colour context.
+- **[Decided]** **Context flows down, results flow up.** Each container boundary transforms time (offset, speed, retime curve), space (each container has its own canvas, and placement is a transform rather than a resample), quality (proxy level, region of interest) and color context.
 - **[Decided]** **Typed ports:** image, mask, audio (with a channel layout), scene, plus later types such as geometry or text. Connections live in the container's structure, never inside a node's opaque payload.
 - **[Decided]** (approved 2026-10-20, replacing "Plain clips are cheap") **Every clip is a graph.** A clip is a Graph container, and a new one starts as Input → Output: its media passed straight through. Those two nodes' ids are worked out from the clip's id (`NodeId::derived`). While the graph is still exactly that, leaving aside where its nodes sit in the node editor, the file leaves it out and loading puts it back, so a timeline of plain clips stays as small as before. An Output inside a clip's graph hands its image up without converting it to the delivery space, so a passthrough graph renders exactly what a plain clip did, with no extra work on the GPU. Compiling a frame of the three-track benchmark timeline went from 5 to 7 µs.
 - **[Decided]** (from step 1) Until a container type can lower itself, nested containers and optional inputs stop compilation with a clear "not yet" error that names the node, rather than rendering something wrong.
-- **[Proposed]** (step 4 plan) **A node with a graph inside.** A Graph container type can also have an image behaviour of its own; the clip does. The compiler lowers the contents first, from their Output node, with the node's path and clocks. The node's own image behaviour then receives the contents' result as its one input. Inside, the Input node (`fw.input`) stands for what the container supplies, which comes from a new `ImageBehaviour::source` hook. For a clip that is its media, so the file, colour space and audio stay on the clip, and the clip's opacity and composite mode apply after its graph. An Output set to "auto" inside such a graph passes its image up as it is, and the holder delivers it. Nested Graph containers with published inputs and outputs later reuse the same Input node.
+- **[Decided]** (from step 4) **A node with a graph inside.** A Graph container type can also have an image behavior of its own; the clip does. The compiler lowers the contents first, from their Output node, with the node's path and clocks. The node's own image behavior then receives the contents' result as its one input. Inside, the Input node (`fw.input`) stands for what the container supplies, which comes from a new `ImageBehavior::source` hook. For a clip that is its media, so the file, color space and audio stay on the clip, and the clip's opacity and composite mode apply after its graph. An Output set to "auto" inside such a graph passes its image up as it is, and the holder delivers it. Nested Graph containers with published inputs and outputs later reuse the same Input node.
 
 ### 4.1 Node interface
 
 - **[Decided]** **Describe, don't execute.** Nodes never touch pixels. They add operations to a plan, and the engine runs the plan. This is what makes fusing, caching, region-of-interest rendering, determinism and plugin parity possible.
 - **[Decided]** A node type is described by plain data (`NodeTypeDesc`: id, version, typed ports, a parameter schema, capabilities), so WASM and shader plugins can provide one as easily as Rust code.
-- **[Decided]** **Image behaviour runs in two phases.**
-  1. `requirements(params, request)` says what the node needs from its inputs. A blur asks for a bigger region, a retime asks for a different time, a temporal filter asks for neighbouring frames.
+- **[Decided]** **Image behavior runs in two phases.**
+  1. `requirements(params, request)` says what the node needs from its inputs. A blur asks for a bigger region, a retime asks for a different time, a temporal filter asks for neighboring frames.
   2. `emit(params, request, input handles, plan)` adds operations and returns a handle.
 
   A sensible default ("same time, same region") means simple nodes implement nothing for the first phase.
 - **[Decided]** **Containers lower themselves** into simpler nodes: a Timeline into time-remap and switch nodes, a LayerStack into merges, a Mixer into gain, pan and bus nodes. That lowering is the compile step. Editor and workspace registration for a container lives on the UI side.
-- **[Decided]** **Audio behaviour is a separate real-time contract** (`prepare`, `process`, `latency`), with no allocation or locks inside `process`. A node may have image behaviour, audio behaviour, or both.
+- **[Decided]** **Audio behavior is a separate real-time contract** (`prepare`, `process`, `latency`), with no allocation or locks inside `process`. A node may have image behavior, audio behavior, or both.
 - **[Decided]** **Nodes never see animation.** The engine resolves keyframes, expressions and automation into plain values at the requested time before calling the node.
 - **[Decided]** **The parameter schema is the single source of truth** for the inspector UI, saving, the Python API, expressions and keyframing.
 - **[Decided]** **The interface works across a plugin boundary:** data in, descriptions out, with no Rust-only features such as generics or borrowed references in the core contract. Rust convenience macros sit on top for built-ins.
@@ -110,12 +110,12 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 ### 4.2 Ports and parameters
 
 - **[Decided]** **Port types:**
-  - **Image:** pixels plus colour-space tag, premultiplied alpha, region of definition, pixel aspect, optional extra channels, pass-through metadata.
+  - **Image:** pixels plus color-space tag, premultiplied alpha, region of definition, pixel aspect, optional extra channels, pass-through metadata.
   - **Mask:** single-channel image, its own type.
   - **Audio:** f32 samples with a channel layout, at one session sample rate (sources resampled at input).
   - **Scene:** a 3D scene handle, so 3D nodes can be chained before a render node.
-  - **Value:** numbers, vectors, colours, curves, tracks.
-- **[Decided]** **Colour-tagged ports with automatic conversion.** A node declares the space it works in (scene-linear, log/ACEScct, display-referred), and the compiler inserts conversions and fuses adjacent ones. Nodes never do colour maths themselves.
+  - **Value:** numbers, vectors, colors, curves, tracks.
+- **[Decided]** **Color-tagged ports with automatic conversion.** A node declares the space it works in (scene-linear, log/ACEScct, display-referred), and the compiler inserts conversions and fuses adjacent ones. Nodes never do color maths themselves.
 - **[Decided]** **Always premultiplied alpha** inside the engine. Straight alpha exists only at file input and output.
 - **[Decided]** **Region of definition on every image, no implicit cropping.** Pixels past the canvas are kept, generators can be infinite, and edge filters read real pixels.
 - **[Decided]** **Optional extra channels** (depth, motion, IDs, normals), allocated only when something produces them.
@@ -123,7 +123,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** **Resolution-independent units.** Positions are in canvas units, never pixels; times are rational time, never frame numbers.
 - **[Decided]** **Parameter kinds:**
   - scalars with units (px, degrees, seconds, dB, EV, ratio), int, bool, choice
-  - vectors; colours (with colour space, HDR values allowed)
+  - vectors; colors (with color space, HDR values allowed)
   - point, rect, transform
   - curve, gradient
   - text, font, media and file references
@@ -132,7 +132,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 
 ### 4.3 Evaluation and caching contract
 
-- **[Decided]** **The purity rule.** A node's output depends only on: its type, version and implementation hash; its resolved parameters at the requested time; its inputs; the request (time, region, scale, quality); and declared resources identified by content (media, fonts, LUTs, colour config). No clock, global state, unseeded randomness, environment variables, or undeclared file reads. WASM sandboxing enforces this for plugins; tests enforce it for built-ins.
+- **[Decided]** **The purity rule.** A node's output depends only on: its type, version and implementation hash; its resolved parameters at the requested time; its inputs; the request (time, region, scale, quality); and declared resources identified by content (media, fonts, LUTs, color config). No clock, global state, unseeded randomness, environment variables, or undeclared file reads. WASM sandboxing enforces this for plugins; tests enforce it for built-ins.
 - **[Decided]** **The cache key is a hash of exactly that list.** Nothing is ever explicitly invalidated. The implementation hash means plugin or app updates miss automatically.
 - **[Decided]** **Things that don't change aren't re-rendered.** Nodes declare whether they vary over time, and constant parameters don't change the key, so a static layer under a long clip renders once.
 - **[Decided]** **Media is identified by a content fingerprint,** checked against size and modification time, not by path. Relinking keeps the cache.
@@ -145,11 +145,11 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 ### 4.4 Plan and execution model
 
 - **[Decided]** A frame is made in three steps:
-  1. **Specialise:** resolve parameters, compute keys, and prune cached subtrees.
+  1. **Specialize:** resolve parameters, compute keys, and prune cached subtrees.
   2. **Schedule:** order the work, allocate memory from known lifetimes, batch submissions.
   3. **Execute:** in slices, pipelined across frames during playback.
 - **[Decided]** **The plan is a render graph with known resource lifetimes.** Transient textures are pooled and aliased.
-- **[Decided]** **Automatic fusion of per-pixel operations** into generated shaders. Operations that read neighbouring pixels stay as separate passes.
+- **[Decided]** **Automatic fusion of per-pixel operations** into generated shaders. Operations that read neighboring pixels stay as separate passes.
 - **[Decided]** **Adaptive tiling and a power-of-two scale pyramid.** Normal frames render whole. Big stills and zoomed views render visible tiles only, with the margin each filter needs taken from its requirements.
 - **[Decided]** **Sliced GPU submission** of a few milliseconds each, so heavy engine work never freezes the UI.
 - **[Decided]** **The playback pipeline:** a decode thread pool feeding GPU uploads through ring buffers; read-ahead in the play direction and speed; rendering several frames ahead; the audio clock selecting the displayed frame; dropped frames shown with a visible indicator rather than stalling; optional background rendering of heavy sections into the disk cache.
@@ -171,12 +171,12 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - A key's time is measured from the clip's start (the default), its end, or a fraction of its length. Outside a clip only start anchors are valid.
   - Video frames are chosen by source time, and the chosen frame's timestamp is part of the load's cache key. A still clip therefore keys the same for its whole length.
 
-## 6. Colour
+## 6. Color
 
 - **[Decided]** The working space is scene-linear float (ACEScg-style), with premultiplied RGBA16F as the default and RGBA32F where precision needs it. 8-bit exists only at input and output edges.
-- **[Decided]** **Input, working, display and export are separate colour boundaries.** Changing the monitor setup never changes exported bytes.
-- **[Decided]** We write our own colour core (matrices, transfer functions, LUTs as GPU operations) using OCIO-compatible concepts. OCIO configs are scoped to the project and their fingerprint goes into cache keys. The `$OCIO` environment variable is never read. ICC support via `lcms2` for photo and print work.
-- **[Decided]** (from step 1) The Output node's colour space defaults to **Auto**, meaning the delivery space. A render chooses it from the output file type (EXR: linear Rec.709, PNG: sRGB) at compile time, so it is part of the plan and its cache keys.
+- **[Decided]** **Input, working, display and export are separate color boundaries.** Changing the monitor setup never changes exported bytes.
+- **[Decided]** We write our own color core (matrices, transfer functions, LUTs as GPU operations) using OCIO-compatible concepts. OCIO configs are scoped to the project and their fingerprint goes into cache keys. The `$OCIO` environment variable is never read. ICC support via `lcms2` for photo and print work.
+- **[Decided]** (from step 1) The Output node's color space defaults to **Auto**, meaning the delivery space. A render chooses it from the output file type (EXR: linear Rec.709, PNG: sRGB) at compile time, so it is part of the plan and its cache keys.
 - **Note** (measured in step 1): half-float intermediates passed through a large-coefficient matrix (ACEScg → Rec.709 has entries up to 1.7, with heavy cancellation) and then the sRGB curve's 12.92× linear segment lose about 1–2% on near-zero and negative values. This is the case "RGBA32F where precision needs it" is for. Nothing needs doing yet.
 - **[Decided]** One delivery spec drives both the final pixel transform and the container metadata, so the two can't drift apart.
 
@@ -188,10 +188,10 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Evaluation is deterministic, and the cache is keyed by a content hash (`blake3`) of each node's inputs and parameters. Never hash the whole project, and never build keys from `Debug` output (both were old-prototype bugs).
 - **[Decided]** A memory-pressure ladder: lower preview quality first, never export quality.
 - **[Decided]** There is **one** engine. There is no full duplicate CPU reference implementation of every effect; correctness comes from golden-image tests.
-- **[Decided]** (from the optimisation pass) **Showing a frame never reads it back.** `Renderer::render_gpu` leaves the frame in a GPU texture and returns once the work is queued. Playback holds these textures; its `FrameSource` is generic over the frame type, so its tests still use small CPU images. `Renderer::render` reads back, for `fw render`, export and tests. Budgets that time a frame wait until the GPU has finished it.
+- **[Decided]** (from the optimization pass) **Showing a frame never reads it back.** `Renderer::render_gpu` leaves the frame in a GPU texture and returns once the work is queued. Playback holds these textures; its `FrameSource` is generic over the frame type, so its tests still use small CPU images. `Renderer::render` reads back, for `fw render`, export and tests. Budgets that time a frame wait until the GPU has finished it.
 
-- **[Proposed]** (step 3 plan) **The frame cache, the GPU-memory tier.** `Renderer::render_gpu` keeps finished frames in GPU memory by their plan's output key, within a budget (2 GiB by default). An edit changes the keys of exactly the frames it affects, so nothing is invalidated explicitly and untouched frames show at once. Frames playback rendered ahead are dropped after an edit, and the timeline shows which frames are cached: the render thread, when idle, recompiles frames whose place is in doubt and checks their keys, so an undo brings cached frames back at once. It replaces working out invalidated time ranges from plan diffs.
-- **[Proposed]** (step 3) **Playing in the editor:** the transport holds the playhead while paused and follows the sound's sample clock while playing (the wall clock when there's no sound or no device). Play from the end starts over; playing stops on the last frame; seeking while playing plays on from there. Frames rendered before an edit are dropped at once, and sound picks up an edit 200 ms after edits stop arriving, so a drag restarts it once. Space plays and pauses, L plays, K pauses. TODO: changing sound parameters on the audio thread without restarting, J (playing backwards), and pre-rolling so the first second doesn't drop frames while the decoders calibrate.
+- **[Decided]** (from step 3) **The frame cache, the GPU-memory tier.** `Renderer::render_gpu` keeps finished frames in GPU memory by their plan's output key, within a budget (2 GiB by default). An edit changes the keys of exactly the frames it affects, so nothing is invalidated explicitly and untouched frames show at once. Frames playback rendered ahead are dropped after an edit, and the timeline shows which frames are cached: the render thread, when idle, recompiles frames whose place is in doubt and checks their keys, so an undo brings cached frames back at once. It replaces working out invalidated time ranges from plan diffs.
+- **[Decided]** (from step 3) **Playing in the editor:** the transport holds the playhead while paused and follows the sound's sample clock while playing (the wall clock when there's no sound or no device). Play from the end starts over; playing stops on the last frame; seeking while playing plays on from there. Frames rendered before an edit are dropped at once, and sound picks up an edit 200 ms after edits stop arriving, so a drag restarts it once. Space plays and pauses, L plays, K pauses. TODO: changing sound parameters on the audio thread without restarting, J (playing backwards), and pre-rolling so the first second doesn't drop frames while the decoders calibrate.
 
 ## 8. Audio
 
@@ -204,7 +204,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** **One automation system.** Audio automation and video keyframes are the same animated-parameter mechanism.
 - **[Decided]** CLAP plugin hosting, run out of process or sandboxed. LV2 and VST3 later.
 - **[Decided]** (from step 2) **Audio engine details:**
-  - A node's audio behaviour names the parameters it reads; the engine resolves them and passes plain numbers. Processors are created and prepared off the audio thread.
+  - A node's audio behavior names the parameters it reads; the engine resolves them and passes plain numbers. Processors are created and prepared off the audio thread.
   - Each playing clip streams through its own lock-free ring buffer, filled by one streaming thread. Voice sets reach the audio thread through a lock-free queue, and old ones come back to be freed elsewhere. Tests prove the mixer never allocates.
   - The master clock counts samples written, minus the device's reported latency, interpolated between blocks (capped at 50 ms so a stalled device stalls the picture rather than letting it drift).
   - Resampling uses FFmpeg's swresample inside `fw-media`, rather than `rubato`, because FFmpeg already decodes the audio.
@@ -219,7 +219,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** A versioned, diffable, readable file format with schema versions per node type and legacy readers.
   - Unknown or future node types round-trip byte-exactly, and edits that would destroy them are refused.
   - Node payloads are structured data, never JSON stored as bytes.
-- **[Proposed]** (step 3 plan) **A continuous gesture is one undo step.** An edit can carry a gesture id, and consecutive edits with the same id merge into one step, so dragging a slider is undone in one go. The merging lives in `fw-doc`'s `Editor`, not the UI.
+- **[Decided]** (from step 3) **A continuous gesture is one undo step.** An edit can carry a gesture id, and consecutive edits with the same id merge into one step, so dragging a slider is undone in one go. The merging lives in `fw-doc`'s `Editor`, not the UI.
 - **[Decided]** Atomic saves (write a temp file, fsync, rename, fsync the directory), rolling backups, and tests that interrupt a save at each step.
 - **[Decided]** **Project documents are pretty-printed JSON** with stable key order and tagged enums. Unknown nodes are held byte-exactly via `serde_json::RawValue`. Large binary data (paint strokes, caches, thumbnails) lives in sidecar files referenced by content hash, never embedded; optional zstd compression may come later. **Hand-written files** (plugin manifests, app config) are TOML. The format sits behind one module.
 - **[Decided]** (from step 1) **File layout details:**
@@ -234,27 +234,27 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** The engine is a library that runs headless, driven equally by the UI, scripts, the CLI and tests. The UI holds no document logic.
 - **[Decided]** Deterministic UI launch modes (open the app in a fixed state for screenshots), useful for design iteration and visual tests.
 - **[Decided]** **UI toolkit: egui**, chosen after the bake-off (`spikes/bakeoff-report.md`) and by using both. We drive `egui`, `egui-winit` and `egui-wgpu` ourselves on our own window and the engine's device; eframe always picks an 8-bit surface, so it is not used. Docking uses `egui_tiles`. Our design-system layer sits on top. The engine's wgpu version follows egui-wgpu's (30 today). Heavy engine work is submitted in slices, the only way to keep 60 fps with zero-copy display on a single queue.
-- **[Decided]** **A custom title bar:** no system decorations. The top bar holds the logo, menus, project name, Export, and minimise, maximise and close. The window moves and resizes through the compositor (winit `drag_window` / `drag_resize_window`), so snapping still works. We draw our own resize borders and cursors.
-- **[Proposed]** (step 3 plan) **`fw-app` layout:** one main window driven by hand (winit, egui, egui-winit, egui-wgpu). Pages come from the document kind: for timelines the Edit page is built now, and the other workspaces are listed but disabled until they exist. A graph document gets a viewer, the inspector and a plain node list until the node editor exists. IBM Plex (SIL OFL) is embedded in the binary. `fw-app` depends on wgpu, because egui-wgpu draws on the engine's device; it and `fw-render` are the only crates that do.
-- **[Proposed]** (step 3 plan) **The deterministic launch mode:** `fw-app <project> --screenshot <png>` opens the project in a fixed state (`--seek` and `--select` set the playhead and the selection, and `--compose` opens the selected clip in Compose), renders until the viewer's frame is ready, saves the window and exits.
-- **[Proposed]** (step 3 plan) **The viewer is the display boundary.** It draws the engine's frame with its own shader inside the UI's pass, with no copy: from the frame's colour space to linear Rec.709, over the viewer background, then encoded for the swapchain (the sRGB curve on the default 10-bit `Rgb10a2Unorm` surface). A real display and view transform replaces that last step later. Exports never pass through it.
-- **[Proposed]** (step 4 plan) **The node editor, on the Compose page.** It shows the graph of the container being edited: the root of a graph document, or a clip opened in Compose.
+- **[Decided]** **A custom title bar:** no system decorations. The top bar holds the logo, menus, project name, Export, and minimize, maximize and close. The window moves and resizes through the compositor (winit `drag_window` / `drag_resize_window`), so snapping still works. We draw our own resize borders and cursors.
+- **[Decided]** (from step 3) **`fw-app` layout:** one main window driven by hand (winit, egui, egui-winit, egui-wgpu). Pages come from the document kind: for timelines the Edit page is built now, and the other workspaces are listed but disabled until they exist. A graph document gets a viewer, the inspector and a plain node list until the node editor exists. IBM Plex (SIL OFL) is embedded in the binary. `fw-app` depends on wgpu, because egui-wgpu draws on the engine's device; it and `fw-render` are the only crates that do.
+- **[Decided]** (from step 3) **The deterministic launch mode:** `fw-app <project> --screenshot <png>` opens the project in a fixed state (`--seek` and `--select` set the playhead and the selection, and `--compose` opens the selected clip in Compose), renders until the viewer's frame is ready, saves the window and exits.
+- **[Decided]** (from step 3) **The viewer is the display boundary.** It draws the engine's frame with its own shader inside the UI's pass, with no copy: from the frame's color space to linear Rec.709, over the viewer background, then encoded for the swapchain (the sRGB curve on the default 10-bit `Rgb10a2Unorm` surface). A real display and view transform replaces that last step later. Exports never pass through it.
+- **[Decided]** (from step 4) **The node editor, on the Compose page.** It shows the graph of the container being edited: the root of a graph document, or a clip opened in Compose.
   - Nodes are boxes with typed ports, inputs on the left and outputs on the right. Connections are curves. The canvas pans and zooms.
   - Dragging from a port to a port connects them (`Command::Connect`, replacing the input's source). Dragging a connection off its input disconnects it. A drop the document would refuse (a loop, or different kinds of data) is shown as refused while dragging, with the reason.
   - Clicking selects a node for the inspector, and Shift-click adds a node to the selection or takes it out. Delete removes the selected nodes. Dragging moves them, one undo step per drag.
   - Nodes are added from a searchable list of the registry's types grouped by category, opened with Tab or a right-click. The new node lands where the list was opened.
-- **[Proposed]** (step 4 plan) **Node positions are saved in the document.** They live in the Graph's contents (`"positions": {"<node id>": [x, y]}`, in editor units) and change through `Command::SetPosition`, so moving nodes is undoable and travels with the file. A node with no saved position is placed by the editor (in columns by depth) until it is moved. The compiler never reads positions, so moving a node changes no cache key.
-- **[Proposed]** (step 4, built) **The inspector edits every numeric kind a plugin can declare:** numbers with sliders, whole numbers, checkboxes, choices, vec2 as an x and a y field, and colours with a picker. One drag or one visit to a field is one undo step. TODO: a colour picker in the Studio style that keeps values above 1.0 and shows which colour space they're in (egui's picker reads them as linear, which is what plugin colour defaults are).
+- **[Decided]** (from step 4) **Node positions are saved in the document.** They live in the Graph's contents (`"positions": {"<node id>": [x, y]}`, in editor units) and change through `Command::SetPosition`, so moving nodes is undoable and travels with the file. A node with no saved position is placed by the editor (in columns by depth) until it is moved. The compiler never reads positions, so moving a node changes no cache key.
+- **[Decided]** (from step 4) **The inspector edits every numeric kind a plugin can declare:** numbers with sliders, whole numbers, checkboxes, choices, vec2 as an x and a y field, and colors with a picker. One drag or one visit to a field is one undo step. TODO: a color picker in the Studio style that keeps values above 1.0 and shows which color space they're in (egui's picker reads them as linear, which is what plugin color defaults are).
 
 ### 10.1 Process model
 
 - **[Decided]** **The interactive app is one process.** UI and engine share the GPU device, so the viewer displays engine textures with no copying.
-- **[Decided]** **The engine is a library behind a command/event API.** The UI uses only that API, as serialisable messages, even in-process.
+- **[Decided]** **The engine is a library behind a command/event API.** The UI uses only that API, as serializable messages, even in-process.
 - **[Decided]** **The same API is served over a local socket** for Python, the CLI and other tools to attach.
 - **[Decided]** **Render queue jobs run in headless worker processes** (`fw render`), so a crashing render never takes the UI down and renders can outlive the UI.
 - **[Decided]** **A command journal on disk** provides crash recovery: replay it after a crash and nothing is lost.
 - **[Decided]** **Rendering on another machine is not a requirement.** The door stays open, because the API is the boundary: a headless `fw serve` mode could be added later for remote or farm rendering.
-- **[Proposed]** (step 3 plan) **`fw-engine`: the engine as one object.** A project open for editing, with its undo history, media, rendering and playback. Clients drive it with serialisable requests (edit, undo, redo, seek, play, pause, save) and get serialisable events back. Calls are synchronous and quick; heavy work (rendering, decoding, editing copies) runs on the engine's own threads. The one exchange that isn't a message is the viewer's frame, a GPU texture handed over in-process, because showing it must not copy. `fw-script` will later serve the same requests over a socket, and `fw play` moves onto it.
+- **[Decided]** (from step 3) **`fw-engine`: the engine as one object.** A project open for editing, with its undo history, media, rendering and playback. Clients drive it with serializable requests (edit, undo, redo, seek, play, pause, save) and get serializable events back. Calls are synchronous and quick; heavy work (rendering, decoding, editing copies) runs on the engine's own threads. The one exchange that isn't a message is the viewer's frame, a GPU texture handed over in-process, because showing it must not copy. `fw-script` will later serve the same requests over a socket, and `fw play` moves onto it.
 
 ## 11. Extensibility
 
@@ -267,16 +267,16 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Audio: CLAP hosting (§8).
 - **[Decided]** "Recipe" plugins that compile parameters into ordinary graphs, so plugin code never runs per frame. This idea comes from the old prototype.
 - **[Decided]** Node dispatch goes through a registry. Adding a node type touches one place (the old prototype needed 8 to 9 files).
-- **[Proposed]** (step 4, built) **Shader nodes** (`fw-shader`). A shader plugin is a folder holding `plugin.toml` and a WGSL file (`shader.wgsl` unless the manifest's `shader` names another). The manifest gives the id, version, name, category, image inputs (one called `image` by default; at least one), parameters (`float`, `int`, `bool`, `choice`, `vec2`, `colour`, with `unit`, `range` for sliders, `limits`, `section`, `animatable` and a choice's `options`) and whether the node varies with time. The WGSL is the body of a per-pixel function, the same as a built-in `PixelOp`:
-  - It sees `c` (the first input's premultiplied pixel), the other inputs by their port ids, and each parameter by its id. Colours arrive unpremultiplied in the space the node works in (the working space), and a choice arrives as the index of the option picked.
-  - It also sees `pos`, the pixel's centre in canvas units, and `frame`, the image's region as `min.xy, max.xy`. Every fused kernel now passes both to every operation; the region leads each kernel's parameter buffer.
+- **[Decided]** (from step 4) **Shader nodes** (`fw-shader`). A shader plugin is a folder holding `plugin.toml` and a WGSL file (`shader.wgsl` unless the manifest's `shader` names another). The manifest gives the id, version, name, category, image inputs (one called `image` by default; at least one), parameters (`float`, `int`, `bool`, `choice`, `vec2`, `color`, with `unit`, `range` for sliders, `limits`, `section`, `animatable` and a choice's `options`) and whether the node varies with time. The WGSL is the body of a per-pixel function, the same as a built-in `PixelOp`:
+  - It sees `c` (the first input's premultiplied pixel), the other inputs by their port ids, and each parameter by its id. Colors arrive unpremultiplied in the space the node works in (the working space), and a choice arrives as the index of the option picked.
+  - It also sees `pos`, the pixel's center in canvas units, and `frame`, the image's region as `min.xy, max.xy`. Every fused kernel now passes both to every operation; the region leads each kernel's parameter buffer.
   - It returns a `vec4<f32>`, which is fused with the operations around it like any per-pixel operation.
-  - The kernel's text (prelude, colour helpers, generator) moved from `fw-compile` into `fw-plugin` (`fw_plugin::kernel`), since the per-pixel contract is node API. The host checks the manifest, refuses ids that clash with names the kernel uses (`c`, `pos`, `frame`, `base`, `prm`, `e0`…, `fw_*`, `op_*`, …) or with WGSL words, and validates the generated function with naga inside the real kernel when it loads. Errors point at the shader file's line and column. A plugin whose manifest parses but whose shader doesn't validate still registers, so documents using it keep their nodes, and rendering it gives an error that shows the shader error. A manifest that can't be read is reported and skipped.
+  - The kernel's text (prelude, color helpers, generator) moved from `fw-compile` into `fw-plugin` (`fw_plugin::kernel`), since the per-pixel contract is node API. The host checks the manifest, refuses ids that clash with names the kernel uses (`c`, `pos`, `frame`, `base`, `prm`, `e0`…, `fw_*`, `op_*`, …) or with WGSL words, and validates the generated function with naga inside the real kernel when it loads. Errors point at the shader file's line and column. A plugin whose manifest parses but whose shader doesn't validate still registers, so documents using it keep their nodes, and rendering it gives an error that shows the shader error. A manifest that can't be read is reported and skipped.
   - The manifest and shader text form the implementation hash, so editing a shader misses the cache with no explicit invalidation.
-  - TODO: helper functions outside the body (they need renaming so fused kernels don't clash), operations that read neighbouring pixels (blurs) with their margins, generators with no input, and a time seed for noise.
-- **[Proposed]** (step 4, built) **Where plugins come from.** The built-in shader plugins are embedded in the binary (`crates/fw-ops/plugins/`). Then each plugin folder under `$XDG_DATA_HOME/framewright/plugins` (or `~/.local/share/…`) is read, then those under each folder in `FW_PLUGIN_PATH`; a folder that is itself a plugin counts as one. A plugin that reuses an id already loaded is reported and skipped. One constructor (`fw_ops::registry`) builds this registry, so the app, `fw render` and `fw play` agree. The folders come in through the engine's `Settings::plugin_folders`, which is empty by default, so tests see only the built-ins. Problems show in the workspace bar and on stderr.
-- **[Proposed]** (step 4, built) **Built-ins on the shader host.** `fw.exposure` moved onto it with the same id, version and parameter, and renders the same pixels (the golden image still matches). New built-ins written as shader plugins: Saturation (towards ACEScg luminance), Invert (one minus each channel in linear light, as Nuke does), Vignette (amount, size, softness and centre) and Mix (A to B by an amount). `fw example` shows Exposure, Saturation and Vignette. This proves the API is complete for per-pixel nodes.
-- **[Proposed]** (step 4, built) **Reloading plugins.** `Request::ReloadPlugins` builds a fresh registry and swaps it into the editor and the render thread. It then follows the same path as an edit: frames rendered ahead are dropped, and cached frames are checked again, so frames of plugins that didn't change stay cached. The engine reports `Event::PluginsReloaded` with any problems. The app looks at the plugin folders' files every half second and sends the request when one changes, so a saved shader shows at once. TODO: inotify instead of looking; when a reload changes a node's parameters, existing nodes keep their stored values and are checked again on the next edit; nodes that loaded as unknown because their plugin was missing stay unknown until the document is opened again; version migrations for plugins come later.
+  - TODO: helper functions outside the body (they need renaming so fused kernels don't clash), operations that read neighboring pixels (blurs) with their margins, generators with no input, and a time seed for noise.
+- **[Decided]** (from step 4) **Where plugins come from.** The built-in shader plugins are embedded in the binary (`crates/fw-ops/plugins/`). Then each plugin folder under `$XDG_DATA_HOME/framewright/plugins` (or `~/.local/share/…`) is read, then those under each folder in `FW_PLUGIN_PATH`; a folder that is itself a plugin counts as one. A plugin that reuses an id already loaded is reported and skipped. One constructor (`fw_ops::registry`) builds this registry, so the app, `fw render` and `fw play` agree. The folders come in through the engine's `Settings::plugin_folders`, which is empty by default, so tests see only the built-ins. Problems show in the workspace bar and on stderr.
+- **[Decided]** (from step 4) **Built-ins on the shader host.** `fw.exposure` moved onto it with the same id, version and parameter, and renders the same pixels (the golden image still matches). New built-ins written as shader plugins: Saturation (toward ACEScg luminance), Invert (one minus each channel in linear light, as Nuke does), Vignette (amount, size, softness and center) and Mix (A to B by an amount). `fw example` shows Exposure, Saturation and Vignette. This proves the API is complete for per-pixel nodes.
+- **[Decided]** (from step 4) **Reloading plugins.** `Request::ReloadPlugins` builds a fresh registry and swaps it into the editor and the render thread. It then follows the same path as an edit: frames rendered ahead are dropped, and cached frames are checked again, so frames of plugins that didn't change stay cached. The engine reports `Event::PluginsReloaded` with any problems. The app looks at the plugin folders' files every half second and sends the request when one changes, so a saved shader shows at once. TODO: inotify instead of looking; when a reload changes a node's parameters, existing nodes keep their stored values and are checked again on the next edit; nodes that loaded as unknown because their plugin was missing stay unknown until the document is opened again; version migrations for plugins come later.
 
 ### Scripting
 
@@ -295,13 +295,13 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Frame times come from the container's timestamps. If every timestamp matches the declared rate after the container's rounding (Matroska stores whole milliseconds), the rate is treated as constant and exact; otherwise each frame keeps its exact time.
   - We apply the YUV matrix and range ourselves with exact constants, never swscale's conversion, which turns 8-bit white into 0.996. (Formats the GPU can't take as they are are unpacked by swscale to 16-bit planes; see the planar item below.)
   - Untagged video is assumed to be Rec.709 primaries on a BT.1886 (2.4 gamma) display, with the Rec.601 matrix below 720 lines.
-- **[Decided]** (from the optimisation pass) **Decoded video stays as planes until the GPU:**
+- **[Decided]** (from the optimization pass) **Decoded video stays as planes until the GPU:**
   - The decoder hands over the planes of integer codes as FFmpeg decoded them: any planar YUV or RGB format, 8 to 16 bits, any chroma subsampling. Other formats (packed RGB, big-endian, …) are unpacked by swscale to 16-bit planes first. Each picture carries its own encoding (matrix, range, bit depth, subsampling, chroma siting), read from the frame's tags.
   - A GPU kernel turns the planes into premultiplied RGBA16F before the plan's kernels run. It reads codes exactly from integer textures and uses the same constants as the CPU reference (`PlanarImage::to_rgba`), and tests compare the two on real clips.
-  - Chroma is upsampled bilinearly and honours siting (untagged means the MPEG-2/H.264 default: co-sited horizontally, centred vertically). That differs slightly from swscale's bicubic on detailed chroma; flat colours stay exact.
+  - Chroma is upsampled bilinearly and honors siting (untagged means the MPEG-2/H.264 default: co-sited horizontally, centered vertically). That differs slightly from swscale's bicubic on detailed chroma; flat colors stay exact.
   - The conversion is its own dispatch rather than fused into the plan's first kernel: the picture describes itself when decoded, so the plan never needs to know pixel formats, and the extra pass costs about 0.1 ms at 1080p. Fusing stays possible.
   - The RAM cache holds decoded planes: 3 MB for a 1080p 4:2:0 8-bit frame, against 33 MB as `f32` RGBA.
-- **[Decided]** (from the optimisation pass) **Decoding speed:** FFmpeg decodes with frame and slice threads, as many as there are cores. The probe records keyframes, and a reader seeks when landing on a keyframe beats decoding forward (a seek counts as 0.25 s of decoding). Each clip keeps its own reader, up to four per file, so a file used twice on a timeline doesn't seek on every frame.
+- **[Decided]** (from the optimization pass) **Decoding speed:** FFmpeg decodes with frame and slice threads, as many as there are cores. The probe records keyframes, and a reader seeks when landing on a keyframe beats decoding forward (a seek counts as 0.25 s of decoding). Each clip keeps its own reader, up to four per file, so a file used twice on a timeline doesn't seek on every frame.
 - **[Decided]** (from the hardware decoding spike, `spikes/vulkan-video`) **Hardware decoding is Vulkan Video, zero-copy, on the engine's own device:**
   - fw-render creates its wgpu device with the video decode extensions and two extra queues: a decode queue and a compute queue that wgpu never uses, both handed to FFmpeg. It also turns on the two features FFmpeg needs and wgpu leaves off (synchronization2, samplerYcbcrConversion). wgpu 30's device-creation hook does all this; no wgpu patches.
   - FFmpeg's Vulkan decoder (H.264, HEVC, AV1) decodes into images on that device. Each decoded image becomes a wgpu NV12 or P010 texture that holds a reference to its frame. A barrier moves it out of the decoder's layout, and timeline semaphores order decode, then our reads, then the decoder reusing the image. Pixels never reach the CPU.
@@ -322,7 +322,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** (from building hardware decoding) **How it fits together:**
   - The types the renderer and media layer share live in fw-compile, beside `Decoder`: `Decoded` (a picture in memory, or a `HardwarePicture` on the GPU), the `HardwareFrame` trait, and `VulkanVideoDevice`, the device's raw handles plus a keep-alive so the device outlives every decoder and picture. `Gpu::video_device` makes one; `ProjectMedia::use_hardware` takes it. `FW_HARDWARE_DECODE=0` keeps the device from being set up for video at all.
   - Every decoder on a device shares one FFmpeg context, because FFmpeg's queue locks are per context and two contexts submitting to one queue hang the GPU (found by tests running in parallel).
-  - Reading a picture: `acquire` takes FFmpeg's frame lock, submits the layout barrier on FFmpeg's compute queue (after decoding's semaphore value `v`, signalling `v + 1`), reserves `v + 2` for the reader and unlocks, so the decoder can keep using the frame as a reference. The renderer acquires each picture at most once per plan (twice would make its waits depend on each other), wraps the image as an NV12 or P010 texture that keeps the frame alive, and converts it with the same kernel as uploaded planes, reading codes back from normalised values and clamping chroma to the picture, not the padded image. At the submit it waits for `v + 1` and signals `v + 2`. If the plan fails before submitting, `abandon` signals `v + 2` from the host; if wgpu rejects the submit, an empty submit carries the staged semaphores. Either way the decoder never waits forever.
+  - Reading a picture: `acquire` takes FFmpeg's frame lock, submits the layout barrier on FFmpeg's compute queue (after decoding's semaphore value `v`, signaling `v + 1`), reserves `v + 2` for the reader and unlocks, so the decoder can keep using the frame as a reference. The renderer acquires each picture at most once per plan (twice would make its waits depend on each other), wraps the image as an NV12 or P010 texture that keeps the frame alive, and converts it with the same kernel as uploaded planes, reading codes back from normalized values and clamping chroma to the picture, not the padded image. At the submit it waits for `v + 1` and signals `v + 2`. If the plan fails before submitting, `abandon` signals `v + 2` from the host; if wgpu rejects the submit, an empty submit carries the staged semaphores. Either way the decoder never waits forever.
   - **Constraint on the UI shell:** wgpu attaches staged semaphores to whichever submit comes next, so every submit to the engine's queue, the UI's included, takes `Gpu::lock_submits`.
   - Hardware readers use one decoder thread (more delay the first frame after a seek). Streams FFmpeg can't decode in hardware (4:2:2 H.264 on these GPUs) fall back inside FFmpeg; a file whose hardware decoding fails later is marked and decodes in software from then on. Copies are written from software decodes.
   - Hardware pictures in the cache count against their own GPU-memory budget, 1 GiB by default, separate from the RAM budget.
@@ -338,7 +338,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Frames are found by index, never by timestamp: frame `i` is frame `i mod 240` of chunk `i / 240`. So a copy shows exactly the original's frame at every moment, variable frame rates included; tests check every frame of constant- and variable-rate clips. Chunks carry no MOV edit list, which would make the decoder discard frames it doesn't cover.
   - While writing, each frame's timestamp is checked against the one the probe found for its index, so a chunk lands only when every frame in it is right; a decoder that skips a frame fails the copy, chunks already landed stay, and the rest of the clip reads the original. A failed copy is recorded and not retried this session (TODO: show it in the UI). A chunk that turns out missing or unreadable (the cache cleared mid-session) is dropped, the frame falls back to the original, and the chunk is made again.
   - Only draft-quality compiles use copies. The compiler asks the media layer whether the frame's chunk is ready; the load step then names the copy, and the name is part of its cache key, so copy and original pixels never share a cache entry.
-  - Copies keep the source's colour: matrix, range, primaries, transfer and chroma siting are written explicitly (where the source left them to be guessed, as our decoder would guess), and swscale converts with the source's siting and range so codes are kept, not converted. Its scaling is bilinear, as the GPU upsamples chroma. Frames from a copy go through the same GPU conversion as any decoded video.
+  - Copies keep the source's color: matrix, range, primaries, transfer and chroma siting are written explicitly (where the source left them to be guessed, as our decoder would guess), and swscale converts with the source's siting and range so codes are kept, not converted. Its scaling is bilinear, as the GPU upsamples chroma. Frames from a copy go through the same GPU conversion as any decoded video.
   - Copies are read with slice threads only: frame threads delay the first frame after a seek by about 10 ms, against under 1 ms with slices. Eight chunk readers stay open; opening another costs about 4 ms.
   - Deviation from §7 ("render at proxy resolution"): a copy smaller than its original (4K sources) is scaled up to the original's size in the GPU conversion, so nothing downstream changes size. The old prototype did the same. TODO: render at the viewer's resolution, using the copy at its own size, when rendering becomes resolution-aware.
   - Measured on the camera-like 1080p clip (`scrub-1080p-copy`, budget 50 ms p95, the old prototype's): 4.4–4.8 ms p95 against 144–163 ms from the original.
@@ -349,7 +349,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 
 ## 13. 3D
 
-- **[Decided]** 3D is a Scene3D container that renders into the image graph: an outliner, cameras, lights, glTF import, extruded text, shadow catchers and camera solves. It is not a modelling tool.
+- **[Decided]** 3D is a Scene3D container that renders into the image graph: an outliner, cameras, lights, glTF import, extruded text, shadow catchers and camera solves. It is not a modeling tool.
 - **[Decided]** Our own wgpu renderer (raster first, path tracing later). Bevy is not used, because its ECS fights our document model.
 
 ## 14. Crate layout and build order
@@ -357,10 +357,10 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 **[Decided]** Dependencies only point downward:
 
 ```
-fw-core      ids, rational time, math, colour-space descriptors, hashing (no GPU, no I/O)
+fw-core      ids, rational time, math, color-space descriptors, hashing (no GPU, no I/O)
 fw-plugin    the node contract: node type descriptions, parameter schemas, registry
 fw-shader    the shader-node plugin host: manifests and WGSL to node types (step 4)
-fw-doc       document model, containers, commands, undo, serialisation, migrations
+fw-doc       document model, containers, commands, undo, serialization, migrations
 fw-compile   authoring tree → flat evaluation graph(s): video and audio schedules
 fw-render    GPU executor, resource pool, content-hashed cache, scheduling
 fw-media     decode/encode, image I/O, probe cache (FFmpeg lives only here)
@@ -368,7 +368,7 @@ fw-audio     real-time audio engine, streaming, master clock, device output
 fw-playback  frames chosen by the master clock, rendered ahead
 fw-ops       built-in nodes, registered via fw-plugin
 fw-script    command protocol server, expression language
-fw-engine    a project open for editing: requests in, events out (Proposed, step 3)
+fw-engine    a project open for editing: requests in, events out (step 3)
 fw-cli       headless render/inspect/play
 fw-app       UI
 
@@ -381,15 +381,17 @@ fw-bench     benchmark harness and performance budgets
 
 **[Decided]** Build a thin slice through every layer first:
 
-1. Core types, document, serialisation, and a three-node graph (image → exposure → output) rendered headlessly to EXR, colour-managed, with golden-image tests.
+1. Core types, document, serialization, and a three-node graph (image → exposure → output) rendered headlessly to EXR, color-managed, with golden-image tests.
 2. Time: a video source and the Timeline container, compiled to the flat graph, plus audio playback with A/V sync.
 3. The UI shell in the Studio style (after the toolkit bake-off): viewer, parameter editing, undo, frame cache.
-4. Shader-node plugins, to prove early that built-ins use the plugin API. Built, with the node editor and Open in Compose (step 4 plan, Proposed).
+4. Shader-node plugins, to prove early that built-ins use the plugin API. Built, with the node editor and Open in Compose.
 5. Then widen: LayerStack and Photo documents, masks, text, mixer, 3D.
 
 **[Decided]** (from the hardware decoding discussion) Before step 3: editing copies and hardware decoding, so scrubbing feels right from the first UI build.
 
-**[Decided]** (from the optimisation pass) The benchmark clip decodes like camera footage: grain at 50 Mbit/s with 2 s keyframe groups, because the clean test pattern decoded about five times faster than real footage would. A second playback workload blends three layers decoded from three places in one file.
+**[Decided]** (from the optimization pass) The benchmark clip decodes like camera footage: grain at 50 Mbit/s with 2 s keyframe groups, because the clean test pattern decoded about five times faster than real footage would. A second playback workload blends three layers decoded from three places in one file.
+
+**[Decided]** (from the Learn docs) **US English everywhere:** interface text, identifiers, file formats, comments and documentation, so Framewright reads the same as the Peios Learn site it publishes through. Its Learn pages follow PSC's writing rules, and because Framewright isn't packaged into Peios, they also hold its full references, such as the shader plugin manifest.
 
 **[Decided]** Process guardrails: a performance budget table (`docs/performance.md`, measured by `fw-bench`) (named workload, statistic, limit), synthetic test media generated with FFmpeg, no benchmark or qualification code in the shipping binary, no files over about 1.5k lines, plain names rather than invented subsystem names, and `TODO` rather than euphemisms like "forthcoming".
 
@@ -397,11 +399,11 @@ fw-bench     benchmark harness and performance budgets
 
 The old code is at `~/projects/video-editor`, with a GPUI fork at `~/projects/framewright-zed`. It's an idea source only.
 
-**Keep:** rational time and the three clocks, anchored keyframes, the compiled flat plan with path-hashed IDs and diffing for invalidation, round-tripping unknown nodes, separate colour boundaries, project-scoped OCIO, the private FFmpeg build, VFR as a source fact, the audio clock as master, atomic writes, the memory-pressure ladder, recipe plugins, performance budgets, deterministic screenshot launch modes.
+**Keep:** rational time and the three clocks, anchored keyframes, the compiled flat plan with path-hashed IDs and diffing for invalidation, round-tripping unknown nodes, separate color boundaries, project-scoped OCIO, the private FFmpeg build, VFR as a source fact, the audio clock as master, atomic writes, the memory-pressure ladder, recipe plugins, performance budgets, deterministic screenshot launch modes.
 
 **Avoid:** the UI host owning the GPU device; a duplicate CPU engine; JSON payloads stored as bytes with wiring hidden inside them; closed type-switch dispatch; whole-project rebuilds, undo snapshots and cache keys; silently clamping time arithmetic; heavy process far ahead of features; giant files; debt hidden behind euphemisms.
 
 ## 16. Open questions
 
 - How paint and retouch strokes are stored and evaluated inside video clips (every frame vs follow motion).
-- Plugin interface details: versioning and sandboxing limits. Shader nodes' manifests are proposed in §11; WASM manifests remain open.
+- Plugin interface details: versioning and sandboxing limits. Shader nodes' manifests are decided in §11; WASM manifests remain open.

@@ -319,7 +319,7 @@ const TINT: &str = r#"
 id = "test.tint"
 version = 1
 name = "Tint"
-category = "Colour"
+category = "Color"
 
 [[params]]
 id = "amount"

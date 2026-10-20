@@ -1,8 +1,8 @@
-//! Image behaviour: how a node describes its work.
+//! Image behavior: how a node describes its work.
 //!
 //! Nodes never touch pixels. In two phases they say what they need from their
-//! inputs ([`ImageBehaviour::requirements`]) and then add operations to a plan
-//! ([`ImageBehaviour::emit`]). The engine runs the plan, which is what makes
+//! inputs ([`ImageBehavior::requirements`]) and then add operations to a plan
+//! ([`ImageBehavior::emit`]). The engine runs the plan, which is what makes
 //! fusion, caching, region-of-interest rendering and determinism possible.
 
 use std::collections::BTreeMap;
@@ -80,7 +80,7 @@ pub struct ImageInfo {
     pub opaque: bool,
 }
 
-/// The colour space a node wants an input in. The compiler converts to it.
+/// The color space a node wants an input in. The compiler converts to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpaceNeed {
     /// The engine's scene-linear working space.
@@ -101,7 +101,7 @@ pub struct PixelOp {
     pub label: String,
     /// A WGSL function body. `c` is the premultiplied input `vec4<f32>`,
     /// `e0`, `e1`, … are the extra inputs' pixels, `prm(base, i)` reads
-    /// parameter `i`, `pos` is the pixel's centre in canvas units and `frame`
+    /// parameter `i`, `pos` is the pixel's center in canvas units and `frame`
     /// the image's region (`min.xy, max.xy`). It must return a `vec4<f32>`.
     /// See [`crate::kernel`] for the shader it goes into.
     pub wgsl: String,
@@ -116,7 +116,7 @@ pub struct NodeError(pub String);
 pub trait PlanBuilder {
     fn info(&self, image: ImageHandle) -> &ImageInfo;
 
-    /// Reads an image file. `space` overrides the colour space the file says
+    /// Reads an image file. `space` overrides the color space the file says
     /// it is in.
     fn load(
         &mut self,
@@ -124,14 +124,14 @@ pub trait PlanBuilder {
         space: Option<ColorSpace>,
     ) -> Result<ImageHandle, NodeError>;
 
-    /// Applies a per-pixel operation. The output is in the input's colour space.
+    /// Applies a per-pixel operation. The output is in the input's color space.
     fn per_pixel(&mut self, input: ImageHandle, op: PixelOp) -> ImageHandle {
         self.per_pixel_with(input, &[], op)
     }
 
     /// A per-pixel operation that also reads `extra` inputs, e.g. a merge
     /// reading the foreground while `input` is the background. Extra inputs
-    /// must be in the same colour space as `input`.
+    /// must be in the same color space as `input`.
     fn per_pixel_with(
         &mut self,
         input: ImageHandle,
@@ -140,8 +140,8 @@ pub trait PlanBuilder {
     ) -> ImageHandle;
 }
 
-pub trait ImageBehaviour: Send + Sync {
-    /// The colour space this node works in for input `index`.
+pub trait ImageBehavior: Send + Sync {
+    /// The color space this node works in for input `index`.
     fn input_space(&self, _params: &ResolvedParams, _index: usize) -> SpaceNeed {
         SpaceNeed::Working
     }
@@ -170,7 +170,7 @@ pub trait ImageBehaviour: Send + Sync {
     }
 
     /// Adds this node's operations and returns its output. When the node is a
-    /// Graph container with a behaviour of its own (a clip), `inputs` is its
+    /// Graph container with a behavior of its own (a clip), `inputs` is its
     /// graph's result alone.
     fn emit(
         &self,

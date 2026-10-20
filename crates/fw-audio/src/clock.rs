@@ -15,7 +15,7 @@ pub trait MasterClock: Send + Sync {
 /// Counts samples as the audio thread writes them.
 ///
 /// Between blocks it interpolates with the wall clock, so frame selection
-/// isn't quantised to the audio block size.
+/// isn't quantized to the audio block size.
 pub struct SampleClock {
     rate: u32,
     epoch: Instant,

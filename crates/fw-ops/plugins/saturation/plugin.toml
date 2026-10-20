@@ -1,7 +1,7 @@
 id = "fw.saturation"
 version = 1
 name = "Saturation"
-category = "Colour"
+category = "Color"
 
 [[params]]
 id = "saturation"

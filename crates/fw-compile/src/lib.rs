@@ -1,9 +1,9 @@
 //! Compiles a document into a render plan.
 //!
 //! 1. Lower the authoring tree into a flat graph of operations, asking each
-//!    node to describe its work ([`fw_plugin::ImageBehaviour`]).
+//!    node to describe its work ([`fw_plugin::ImageBehavior`]).
 //! 2. Resolve animation to plain values at the requested time.
-//! 3. Insert colour conversions where an input isn't in the space a node
+//! 3. Insert color conversions where an input isn't in the space a node
 //!    works in.
 //! 4. Key every operation by exactly what determines its output.
 //! 5. Fuse chains of per-pixel operations into single GPU passes.
@@ -35,7 +35,7 @@ pub struct MediaInfo {
     pub path: PathBuf,
     pub width: u32,
     pub height: u32,
-    /// The colour space the file says its pixels are in.
+    /// The color space the file says its pixels are in.
     pub space: ColorSpace,
     /// A hash of the file's content, so renamed or moved files keep their cache.
     pub fingerprint: ContentHash,

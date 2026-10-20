@@ -126,7 +126,7 @@ pub struct App {
     pub shown: Option<Shown>,
     /// What the UI asked of the OS window this frame.
     pub actions: Vec<WindowAction>,
-    pub maximised: bool,
+    pub maximized: bool,
     /// The last thing that went wrong, shown in the workspace bar.
     message: Option<String>,
     /// The plugin problem being shown, so a reload that fixes it clears it.
@@ -161,7 +161,7 @@ impl App {
             compose: compose_layout(),
             shown: None,
             actions: vec![],
-            maximised: false,
+            maximized: false,
             message: None,
             plugin_problem: None,
             gpu_name: engine.gpu().info.name.clone(),
@@ -214,7 +214,7 @@ impl App {
         {
             self.back_to_timeline(engine);
         }
-        if !self.maximised
+        if !self.maximized
             && let Some(direction) = chrome::resize_edges(ui.ctx())
         {
             self.actions.push(WindowAction::Resize(direction));
@@ -230,7 +230,7 @@ impl App {
             modified: engine.is_modified(),
             undo: engine.undo_label(),
             redo: engine.redo_label(),
-            maximised: self.maximised,
+            maximized: self.maximized,
             selection: self.selected.is_some(),
             clip_selected: (self.kind == Kind::Video)
                 .then(|| self.selected.is_some_and(|id| is_clip(engine, id))),
@@ -278,14 +278,14 @@ impl App {
                     Page::Compose(_) => &mut self.compose,
                 };
                 let mut tree = std::mem::replace(page, Tree::empty(egui::Id::unique("swap")));
-                let mut behaviour = Behaviour {
+                let mut behavior = Behavior {
                     app: self,
                     engine,
                     commands: &mut commands,
                     edits: &mut edits,
                     root: tree.root,
                 };
-                tree.ui(&mut behaviour, ui);
+                tree.ui(&mut behavior, ui);
                 match self.page {
                     Page::Edit => self.edit = tree,
                     Page::Compose(_) => self.compose = tree,
@@ -497,14 +497,14 @@ fn edit_layout() -> Tree<Pane> {
     let left = tiles.insert_pane(Pane::Media);
     let left = tiles.insert_tab_tile(vec![left]);
     let viewer = tiles.insert_pane(Pane::Viewer);
-    let centre = tiles.insert_tab_tile(vec![viewer]);
+    let center = tiles.insert_tab_tile(vec![viewer]);
     let inspector = tiles.insert_pane(Pane::Inspector);
     let right = tiles.insert_tab_tile(vec![inspector]);
-    let top = tiles.insert_horizontal_tile(vec![left, centre, right]);
+    let top = tiles.insert_horizontal_tile(vec![left, center, right]);
     set_shares(
         &mut tiles,
         top,
-        &[(left, 300.0), (centre, 972.0), (right, 320.0)],
+        &[(left, 300.0), (center, 972.0), (right, 320.0)],
     );
     let timeline = tiles.insert_pane(Pane::Timeline);
     let bottom = tiles.insert_tab_tile(vec![timeline]);
@@ -540,7 +540,7 @@ fn set_shares(tiles: &mut Tiles<Pane>, container: TileId, shares: &[(TileId, f32
     }
 }
 
-struct Behaviour<'a> {
+struct Behavior<'a> {
     app: &'a mut App,
     engine: &'a Engine,
     commands: &'a mut Vec<AppCommand>,
@@ -548,7 +548,7 @@ struct Behaviour<'a> {
     root: Option<TileId>,
 }
 
-impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
+impl egui_tiles::Behavior<Pane> for Behavior<'_> {
     fn pane_ui(&mut self, ui: &mut Ui, _tile: TileId, pane: &mut Pane) -> egui_tiles::UiResponse {
         let rect = ui.max_rect();
         ui.painter().rect_filled(rect, CornerRadius::ZERO, t::PANEL);
@@ -661,7 +661,7 @@ impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
                 ui.painter()
                     .rect_filled(rect, CornerRadius::same(3), t::RAISED2);
             }
-            let colour = if state.active || response.hovered() {
+            let color = if state.active || response.hovered() {
                 t::TEXT_BRIGHT
             } else {
                 t::TEXT2
@@ -671,7 +671,7 @@ impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
                 Align2::CENTER_CENTER,
                 &title,
                 sans(12.0),
-                colour,
+                color,
             );
         }
         response
@@ -789,11 +789,11 @@ fn round_corners(painter: &egui::Painter, r: Rect, radius: f32, bg: Color32) {
         (r.right_bottom(), vec2(-1.0, -1.0)),
     ];
     for (corner, dir) in corners {
-        let centre = corner + dir * radius;
+        let center = corner + dir * radius;
         let mut points: Vec<Pos2> = vec![corner];
         for k in 0..=6 {
             let a = k as f32 / 6.0 * std::f32::consts::FRAC_PI_2;
-            points.push(centre - vec2(dir.x * radius * a.cos(), dir.y * radius * a.sin()));
+            points.push(center - vec2(dir.x * radius * a.cos(), dir.y * radius * a.sin()));
         }
         let mut mesh = egui::Mesh::default();
         for (i, q) in points.iter().enumerate() {

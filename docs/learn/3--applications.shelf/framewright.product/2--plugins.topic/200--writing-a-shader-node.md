@@ -42,7 +42,7 @@ Knowing some WGSL helps, but this page doesn't depend on it.
    [[params]]
    id = "tint"
    name = "Tint"
-   type = "colour"
+   type = "color"
    default = [1.0, 0.6, 0.3]
 
    [[params]]

@@ -1,4 +1,4 @@
-//! Rendering on the GPU, checked against the colour maths in fw-core.
+//! Rendering on the GPU, checked against the color maths in fw-core.
 //!
 //! These need a GPU (or a software Vulkan driver such as llvmpipe). Pick one
 //! with `FW_ADAPTER=<part of its name>`.
@@ -49,7 +49,7 @@ struct Scene {
     read: NodeId,
     exposure: NodeId,
     output: NodeId,
-    /// The file's pixels as the decoder will see them (quantised to 8 bits).
+    /// The file's pixels as the decoder will see them (quantized to 8 bits).
     source: RgbaImage,
 }
 
@@ -134,7 +134,7 @@ fn reference(source: &RgbaImage, input: ColorSpace, stops: f64, output: ColorSpa
     for y in 0..source.height {
         for x in 0..source.width {
             // The engine uploads premultiplied half floats; model that rounding,
-            // since colour matrices with large coefficients magnify it.
+            // since color matrices with large coefficients magnify it.
             let [r, g, b, a] = source.pixel(x, y);
             let half = |v: f32| f64::from(half::f16::from_f32(v).to_f32());
             let a16 = half(a);
@@ -175,7 +175,7 @@ fn assert_close(got: &RgbaImage, want: &RgbaImage, what: &str) {
 }
 
 #[test]
-fn every_colour_space_pair_matches_the_cpu_reference() {
+fn every_color_space_pair_matches_the_cpu_reference() {
     let mut s = scene();
     let mut renderer = Renderer::new(gpu(), DEFAULT_CACHE_BYTES);
     let spaces = [
@@ -1041,7 +1041,7 @@ fn the_faster_decoder_is_chosen_for_each_kind_of_video() {
 /// to canvas units can be read back.
 struct Position;
 
-impl fw_plugin::ImageBehaviour for Position {
+impl fw_plugin::ImageBehavior for Position {
     fn input_space(&self, _: &fw_plugin::ResolvedParams, _: usize) -> fw_plugin::SpaceNeed {
         // The delivery space, so nothing converts what it writes.
         fw_plugin::SpaceNeed::Exact(ColorSpace::LINEAR_REC709)
@@ -1065,7 +1065,7 @@ impl fw_plugin::ImageBehaviour for Position {
 }
 
 #[test]
-fn operations_see_each_pixels_centre_in_canvas_units() {
+fn operations_see_each_pixels_center_in_canvas_units() {
     let mut s = scene();
     let mut registry = fw_ops::builtin_registry();
     let desc = s.editor.registry().desc("fw.exposure").unwrap().clone();

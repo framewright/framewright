@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn anchored_keys_serialise_compactly() {
+    fn anchored_keys_serialize_compactly() {
         let mut k = key("-1", 1.0);
         k.anchor = Anchor::End;
         assert_eq!(

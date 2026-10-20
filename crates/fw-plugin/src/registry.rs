@@ -6,9 +6,9 @@ use std::sync::Arc;
 use fw_core::{ContentHash, KeyHasher};
 use serde_json::{Map, Value};
 
-use crate::audio::AudioBehaviour;
+use crate::audio::AudioBehavior;
 use crate::desc::NodeTypeDesc;
-use crate::image::ImageBehaviour;
+use crate::image::ImageBehavior;
 
 /// Upgrades saved parameters from `from_version` to the current version, in place.
 pub type MigrateFn = fn(from_version: u32, params: &mut Map<String, Value>) -> Result<(), String>;
@@ -21,12 +21,12 @@ pub enum RegistryError {
     Invalid { id: String, problem: String },
 }
 
-/// A registered node type: its description plus behaviour.
+/// A registered node type: its description plus behavior.
 pub struct NodeType {
     pub desc: NodeTypeDesc,
     pub migrate: Option<MigrateFn>,
-    pub image: Option<Arc<dyn ImageBehaviour>>,
-    pub audio: Option<Arc<dyn AudioBehaviour>>,
+    pub image: Option<Arc<dyn ImageBehavior>>,
+    pub audio: Option<Arc<dyn AudioBehavior>>,
     /// Changes whenever the implementation might produce different pixels, so
     /// cached results from older code are never reused. Part of every cache key.
     pub impl_hash: ContentHash,
@@ -47,20 +47,20 @@ impl NodeType {
         }
     }
 
-    /// Adds real-time audio behaviour.
-    pub fn with_audio(mut self, behaviour: impl AudioBehaviour + 'static) -> NodeType {
-        self.audio = Some(Arc::new(behaviour));
+    /// Adds real-time audio behavior.
+    pub fn with_audio(mut self, behavior: impl AudioBehavior + 'static) -> NodeType {
+        self.audio = Some(Arc::new(behavior));
         self
     }
 
-    /// Adds image behaviour. `implementation` is anything that changes when the
+    /// Adds image behavior. `implementation` is anything that changes when the
     /// output could change: shader source, a revision string, a build hash.
     pub fn with_image(
         mut self,
-        behaviour: impl ImageBehaviour + 'static,
+        behavior: impl ImageBehavior + 'static,
         implementation: &str,
     ) -> NodeType {
-        self.image = Some(Arc::new(behaviour));
+        self.image = Some(Arc::new(behavior));
         self.impl_hash = KeyHasher::new("fw.impl")
             .str(&self.desc.id)
             .u32(self.desc.version)

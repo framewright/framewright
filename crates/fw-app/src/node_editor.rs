@@ -107,7 +107,7 @@ struct Port {
     side: Side,
     name: String,
     ty: PortType,
-    /// Its centre, in editor units.
+    /// Its center, in editor units.
     at: Pos2,
 }
 
@@ -118,7 +118,7 @@ struct Placed {
     name: String,
     /// The second line: what the node reads or what it is.
     detail: String,
-    colour: Color32,
+    color: Color32,
     icon: &'static str,
 }
 
@@ -235,13 +235,13 @@ pub fn node_editor(
             .iter()
             .find(|p| p.side == Side::Input && p.port == edge.to)
             .map_or(PortType::Image, |p| p.ty);
-        let colour = if lit { t::ACCENT } else { wire_colour(ty) };
+        let color = if lit { t::ACCENT } else { wire_color(ty) };
         wire(
             &painter,
             a,
             b,
             view.zoom,
-            Stroke::new(if lit { 1.8 } else { 1.5 }, colour),
+            Stroke::new(if lit { 1.8 } else { 1.5 }, color),
         );
     }
 
@@ -338,8 +338,8 @@ pub fn node_editor(
 
     // Ports, over the nodes so they win the pointer.
     for port in &ports {
-        let centre = view.to_screen(canvas, port.at);
-        let hit = Rect::from_center_size(centre, Vec2::splat(14.0));
+        let center = view.to_screen(canvas, port.at);
+        let hit = Rect::from_center_size(center, Vec2::splat(14.0));
         let id = ui
             .scope_id()
             .with(("port", &port.port, port.side == Side::Input));
@@ -382,10 +382,10 @@ pub fn node_editor(
         }
         let radius = 4.0 * view.zoom.max(0.6);
         painter.circle(
-            centre,
+            center,
             radius,
             t::WELL,
-            Stroke::new(1.5, port_colour(port.ty)),
+            Stroke::new(1.5, port_color(port.ty)),
         );
     }
 
@@ -413,7 +413,7 @@ pub fn node_editor(
         let refused = plan
             .as_ref()
             .and_then(|edit| dry_run(doc, registry, &edit.commands).err());
-        let colour = match (&refused, target) {
+        let color = match (&refused, target) {
             (Some(_), _) => t::REFUSED,
             (None, Some(_)) => t::ACCENT,
             (None, None) => t::TEXT2,
@@ -422,7 +422,7 @@ pub fn node_editor(
             Side::Output => (start, end),
             Side::Input => (end, start),
         };
-        wire(&painter, a, b, view.zoom, Stroke::new(1.8, colour));
+        wire(&painter, a, b, view.zoom, Stroke::new(1.8, color));
         if let Some(reason) = &refused {
             let galley = painter.layout(reason.clone(), sans(11.0), t::TEXT_BRIGHT, 260.0);
             let at = pos + vec2(14.0, 10.0);
@@ -605,13 +605,13 @@ fn lay_out(
                 });
             }
         }
-        let (colour, icon) = category_look(desc);
+        let (color, icon) = category_look(desc);
         placed.push(Placed {
             id,
             rect,
             name: node.name().to_owned(),
             detail: detail(doc, container, node, desc),
-            colour,
+            color,
             icon,
         });
     }
@@ -718,35 +718,35 @@ fn media_name(node: &fw_doc::KnownNode) -> Option<String> {
     })
 }
 
-/// The colour strip and icon for a node's category.
+/// The color strip and icon for a node's category.
 fn category_look(desc: Option<&NodeTypeDesc>) -> (Color32, &'static str) {
     let Some(category) = desc.map(|d| d.category.as_str()) else {
         return (t::TEXT_DISABLED, icons::FILTER);
     };
     let icon = match category {
         "Sources" => icons::IMAGE,
-        "Colour" => icons::COLOUR,
+        "Color" => icons::COLOR,
         "Outputs" => icons::OUTPUT,
         "Containers" => icons::NEST,
         _ => icons::FILTER,
     };
-    (library::category_colour(category), icon)
+    (library::category_color(category), icon)
 }
 
-fn port_colour(ty: PortType) -> Color32 {
+fn port_color(ty: PortType) -> Color32 {
     match ty {
         PortType::Image => t::PORT_IMAGE,
         PortType::Mask => t::PORT_MASK,
         PortType::Audio => t::CLIP_AUDIO.1,
         PortType::Scene => t::NODE_CONTAINER,
-        PortType::Value => t::NODE_COLOUR,
+        PortType::Value => t::NODE_COLOR,
     }
 }
 
-fn wire_colour(ty: PortType) -> Color32 {
+fn wire_color(ty: PortType) -> Color32 {
     match ty {
         PortType::Image => t::WIRE,
-        other => port_colour(other),
+        other => port_color(other),
     }
 }
 
@@ -786,7 +786,7 @@ fn pan_and_zoom(ui: &Ui, view: &mut View, canvas: Rect, pointer: Pos2) {
 /// The well behind the nodes: a fine grid with a coarser one over it.
 fn grid(painter: &egui::Painter, canvas: Rect, view: &View) {
     painter.rect_filled(canvas, CornerRadius::ZERO, t::WELL);
-    for (step, colour) in [(16.0, t::GRID_FINE), (80.0, t::GRID)] {
+    for (step, color) in [(16.0, t::GRID_FINE), (80.0, t::GRID)] {
         let spacing = step * view.zoom;
         if spacing < 6.0 {
             continue;
@@ -794,12 +794,12 @@ fn grid(painter: &egui::Painter, canvas: Rect, view: &View) {
         let origin = canvas.min + view.offset;
         let mut x = origin.x + ((canvas.left() - origin.x) / spacing).ceil() * spacing;
         while x < canvas.right() {
-            painter.vline(x, canvas.y_range(), Stroke::new(1.0, colour));
+            painter.vline(x, canvas.y_range(), Stroke::new(1.0, color));
             x += spacing;
         }
         let mut y = origin.y + ((canvas.top() - origin.y) / spacing).ceil() * spacing;
         while y < canvas.bottom() {
-            painter.hline(canvas.x_range(), y, Stroke::new(1.0, colour));
+            painter.hline(canvas.x_range(), y, Stroke::new(1.0, color));
             y += spacing;
         }
     }
@@ -849,7 +849,7 @@ fn draw_node(painter: &egui::Painter, node: &Placed, rect: Rect, zoom: f32, sele
             sw: 0,
             se: 0,
         },
-        node.colour,
+        node.color,
     );
 
     let head = Rect::from_min_size(rect.min, vec2(rect.width(), NODE_HEAD * zoom));
@@ -859,7 +859,7 @@ fn draw_node(painter: &egui::Painter, node: &Placed, rect: Rect, zoom: f32, sele
         painter,
         Rect::from_center_size(well.center(), Vec2::splat(14.0 * zoom)),
         node.icon,
-        node.colour,
+        node.color,
         1.6 * zoom.min(1.0),
         false,
     );

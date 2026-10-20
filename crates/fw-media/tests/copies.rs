@@ -45,7 +45,7 @@ fn copy_frame(dir: &Path, profile: &CopyProfile, index: u64) -> fw_core::PlanarI
         .unwrap()
 }
 
-fn grey(image: &fw_core::RgbaImage) -> u8 {
+fn gray(image: &fw_core::RgbaImage) -> u8 {
     (image.pixel(5, 5)[0] * 255.0).round() as u8
 }
 
@@ -64,7 +64,7 @@ fn every_frame_of_a_copy_is_the_originals() {
         for i in 0..count {
             let frame = copy_frame(dir.path(), &PROFILE, i);
             assert_eq!(
-                grey(&frame.to_rgba()),
+                gray(&frame.to_rgba()),
                 level(i),
                 "{} frame {i}",
                 source.display()
@@ -80,7 +80,7 @@ fn every_frame_of_a_copy_is_the_originals() {
 }
 
 #[test]
-fn copies_are_prores_proxy_with_the_sources_colour() {
+fn copies_are_prores_proxy_with_the_sources_color() {
     let source = fw_testmedia::h264();
     let (dir, info, _) = make(&source, &PROFILE);
     let original = VideoReader::open(&source)
@@ -101,7 +101,7 @@ fn copies_are_prores_proxy_with_the_sources_colour() {
     let chunk = CopyProfile::chunk_path(dir.path(), 0);
     assert_eq!(probe_video(&chunk).unwrap().space, info.space);
     // Close to the original. ProRes HQ shows the conversion itself is right;
-    // Proxy loses more, most at saturated colour edges.
+    // Proxy loses more, most at saturated color edges.
     let differences = |copy: &fw_core::PlanarImage| {
         let (a, b) = (original.to_rgba(), copy.to_rgba());
         let mut d: Vec<f32> = a
@@ -152,7 +152,7 @@ fn large_sources_are_scaled_down_to_the_profile() {
     let (dir, _, _) = make(&fw_testmedia::count_24fps(), &small);
     let frame = copy_frame(dir.path(), &small, 3);
     assert_eq!((frame.width, frame.height), (32, 16));
-    assert_eq!(grey(&frame.to_rgba()), level(3));
+    assert_eq!(gray(&frame.to_rgba()), level(3));
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn a_lost_chunk_falls_back_to_the_original_and_is_made_again() {
     // Compiles now read the original, which decodes as usual...
     assert_eq!(media.editing_copy(&info, frame), None);
     assert_eq!(
-        grey(&media.decode(&load(None)).unwrap().to_rgba().unwrap()),
+        gray(&media.decode(&load(None)).unwrap().to_rgba().unwrap()),
         level(15)
     );
     // ...until the chunk is made again.
@@ -273,5 +273,5 @@ fn a_lost_chunk_falls_back_to_the_original_and_is_made_again() {
     assert_eq!(media.editing_copy(&info, frame), Some("test"));
     let decoded = media.decode(&load(Some("test"))).unwrap();
     assert_eq!((decoded.size()), (32, 16));
-    assert_eq!(grey(&decoded.to_rgba().unwrap()), level(15));
+    assert_eq!(gray(&decoded.to_rgba().unwrap()), level(15));
 }

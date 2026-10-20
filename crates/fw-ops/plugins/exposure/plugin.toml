@@ -1,7 +1,7 @@
 id = "fw.exposure"
 version = 1
 name = "Exposure"
-category = "Colour"
+category = "Color"
 
 [[params]]
 id = "exposure"

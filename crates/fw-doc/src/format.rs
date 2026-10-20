@@ -62,7 +62,7 @@ pub fn to_json(doc: &Document) -> String {
         root: doc.root,
         nodes: BTreeMap::from([(doc.root, node_out(doc, doc.root))]),
     };
-    let mut text = serde_json::to_string_pretty(&file).expect("documents always serialise");
+    let mut text = serde_json::to_string_pretty(&file).expect("documents always serialize");
     text.push('\n');
     text
 }

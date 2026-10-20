@@ -1,10 +1,10 @@
-//! Output: marks what a graph delivers, and in which colour space.
+//! Output: marks what a graph delivers, and in which color space.
 //!
 //! Writing files is not the node's job. Sinks stay out of the pure graph; the
 //! caller (the CLI, the render queue) writes what the plan produces.
 
 use fw_plugin::{
-    ImageBehaviour, ImageHandle, NodeError, NodeType, NodeTypeDesc, OUTPUT_TYPE, ParamDesc,
+    ImageBehavior, ImageHandle, NodeError, NodeType, NodeTypeDesc, OUTPUT_TYPE, ParamDesc,
     PlanBuilder, PortDesc, PortType, Request, ResolvedParams, SpaceNeed,
 };
 
@@ -20,7 +20,7 @@ pub fn node_type() -> NodeType {
         outputs: vec![],
         params: vec![ParamDesc::choice(
             "space",
-            "Colour space",
+            "Color space",
             &SPACE_CHOICES,
             "auto",
         )],
@@ -32,7 +32,7 @@ pub fn node_type() -> NodeType {
 
 struct Output;
 
-impl ImageBehaviour for Output {
+impl ImageBehavior for Output {
     fn input_space(&self, params: &ResolvedParams, _index: usize) -> SpaceNeed {
         match space_from_choice(params.text("space")) {
             Some(space) => SpaceNeed::Exact(space),

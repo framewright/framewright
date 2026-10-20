@@ -195,7 +195,7 @@ impl Window {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_colour(self.config.format)),
+                        load: wgpu::LoadOp::Clear(clear_color(self.config.format)),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -234,7 +234,7 @@ impl Window {
 }
 
 /// The background behind every panel, as the surface format wants it.
-fn clear_colour(format: wgpu::TextureFormat) -> wgpu::Color {
+fn clear_color(format: wgpu::TextureFormat) -> wgpu::Color {
     let [r, g, b, _] = crate::style::tokens::BG.to_array();
     let mut c = [r, g, b].map(|v| v as f64 / 255.0);
     if fw_render::SurfaceEncoding::of(format) != fw_render::SurfaceEncoding::Unorm {

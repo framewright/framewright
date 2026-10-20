@@ -239,7 +239,7 @@ mod tests {
                 bits: 8,
                 shift: 0,
                 chroma_shift: (1, 1),
-                siting: (Siting::Cosited, Siting::Centred),
+                siting: (Siting::Cosited, Siting::Centered),
                 alpha: false,
             },
             frame: Arc::new(NoFrame),

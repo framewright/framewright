@@ -66,7 +66,7 @@ decoding), single-layer playback is 16.1 ms and the three-layer composite
 50.3 ms, over budget; scrubbing from the editing copy is 16.4 ms. Budgets are
 set for a real GPU.
 
-### Before and after the optimisation pass
+### Before and after the optimization pass
 
 The same clip, before the pass: decoding 35.8 ms, playback 70.7 ms, scrubbing
 867 ms. A 1080p playback frame used to go:

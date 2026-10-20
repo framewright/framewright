@@ -1,4 +1,4 @@
-//! Compiler behaviour: plan shape, fusion, colour conversion, keys and errors.
+//! Compiler behavior: plan shape, fusion, color conversion, keys and errors.
 
 use std::path::PathBuf;
 use std::sync::Arc;

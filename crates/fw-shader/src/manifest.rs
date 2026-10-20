@@ -4,7 +4,7 @@
 //! id = "fw.saturation"
 //! version = 1
 //! name = "Saturation"
-//! category = "Colour"
+//! category = "Color"
 //!
 //! [[params]]
 //! id = "saturation"
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Inputs default to one image called `image`. Each parameter's `type` is
-//! `float`, `int`, `bool`, `choice`, `vec2` or `colour`; `range` is what a
+//! `float`, `int`, `bool`, `choice`, `vec2` or `color`; `range` is what a
 //! slider covers and `limits` what's allowed.
 
 use fw_core::ColorSpace;
@@ -232,7 +232,7 @@ impl ParamEntry {
                         .ok_or_else(|| wrong_default("two numbers, [x, y]"))?,
                 ),
             ),
-            "colour" => {
+            "color" => {
                 let rgba = match default {
                     None => [0.0, 0.0, 0.0, 1.0],
                     Some(v) => numbers::<4>(v)
@@ -250,7 +250,7 @@ impl ParamEntry {
             other => {
                 return Err(format!(
                     "parameter {:?} has unknown type {other:?}: use float, int, bool, choice, vec2 \
-                     or colour",
+                     or color",
                     self.id
                 ));
             }
@@ -361,15 +361,15 @@ options = [{{ id = \"soft\", name = \"Soft\" }}, {{ id = \"hard\", name = \"Hard
 default = \"hard\"
 
 [[params]]
-id = \"centre\"
-name = \"Centre\"
+id = \"center\"
+name = \"Center\"
 type = \"vec2\"
 default = [0.5, 0.5]
 
 [[params]]
 id = \"tint\"
 name = \"Tint\"
-type = \"colour\"
+type = \"color\"
 default = [1, 0.5, 0.25]
 "
         );
@@ -388,11 +388,11 @@ default = [1, 0.5, 0.25]
         assert_eq!(mode.default, ParamValue::Text("hard".into()));
         assert!(!mode.animatable);
         assert_eq!(
-            desc.param("centre").unwrap().default,
+            desc.param("center").unwrap().default,
             ParamValue::Vec2([0.5, 0.5])
         );
         let ParamValue::Color(tint) = desc.param("tint").unwrap().default else {
-            panic!("a colour");
+            panic!("a color");
         };
         assert_eq!(tint.rgba, [1.0, 0.5, 0.25, 1.0]);
     }
@@ -416,7 +416,7 @@ default = [1, 0.5, 0.25]
 
     #[test]
     fn mistakes_are_explained() {
-        let unknown = format!("{HEAD}colour = \"red\"\n");
+        let unknown = format!("{HEAD}color = \"red\"\n");
         assert!(desc(&unknown).unwrap_err().contains("unknown field"));
         let out_of_range = format!(
             "{HEAD}[[params]]\nid = \"a\"\nname = \"A\"\ntype = \"float\"\ndefault = 5\nlimits = [0, 1]\n"

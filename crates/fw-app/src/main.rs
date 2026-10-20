@@ -276,7 +276,7 @@ impl Shell {
         }
 
         let window = &mut running.window;
-        running.app.maximised = window.window.is_maximized();
+        running.app.maximized = window.window.is_maximized();
         let input = window.state.take_egui_input(&window.window);
         let app = &mut running.app;
         let mut output = window.ctx.run_ui(input, |ui| app.ui(ui, engine));
@@ -298,8 +298,8 @@ impl Shell {
                 WindowAction::Resize(direction) => {
                     let _ = w.drag_resize_window(direction);
                 }
-                WindowAction::Minimise => w.set_minimized(true),
-                WindowAction::ToggleMaximise => w.set_maximized(!w.is_maximized()),
+                WindowAction::Minimize => w.set_minimized(true),
+                WindowAction::ToggleMaximize => w.set_maximized(!w.is_maximized()),
                 WindowAction::Close => event_loop.exit(),
             }
         }

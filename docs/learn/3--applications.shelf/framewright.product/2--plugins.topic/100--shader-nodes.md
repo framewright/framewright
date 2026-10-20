@@ -61,7 +61,7 @@ Each parameter type arrives in the shader as a WGSL type:
 | `bool` | `bool` | `true` or `false` |
 | `choice` | `i32` | The position of the option picked, counting from 0 |
 | `vec2` | `vec2<f32>` | The two numbers |
-| `colour` | `vec4<f32>` | Red, green, blue, and alpha, in the working color space |
+| `color` | `vec4<f32>` | Red, green, blue, and alpha, in the working color space |
 
 ## Color and alpha
 

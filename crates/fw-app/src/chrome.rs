@@ -18,8 +18,8 @@ pub enum WindowAction {
     /// Move the window with the pointer, through the compositor.
     Drag,
     Resize(ResizeDirection),
-    Minimise,
-    ToggleMaximise,
+    Minimize,
+    ToggleMaximize,
     Close,
 }
 
@@ -53,7 +53,7 @@ pub struct TitleBar<'a> {
     pub modified: bool,
     pub undo: Option<&'a str>,
     pub redo: Option<&'a str>,
-    pub maximised: bool,
+    pub maximized: bool,
     /// Something is selected that Delete would remove.
     pub selection: bool,
     /// Whether a clip is selected, or `None` when the document has no clips
@@ -78,7 +78,7 @@ pub fn title_bar(
         actions.push(WindowAction::Drag);
     }
     if background.double_clicked() {
-        actions.push(WindowAction::ToggleMaximise);
+        actions.push(WindowAction::ToggleMaximize);
     }
 
     ui.horizontal_centered(|ui| {
@@ -91,7 +91,7 @@ pub fn title_bar(
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            window_controls(ui, bar.maximised, actions);
+            window_controls(ui, bar.maximized, actions);
             ui.add_space(10.0);
             ui.spacing_mut().item_spacing.x = 2.0;
             export_button(ui);
@@ -113,7 +113,7 @@ pub fn title_bar(
         });
     });
 
-    // The project's name and save state, centred on the window.
+    // The project's name and save state, centered on the window.
     let painter = ui.painter();
     let name = painter.layout_no_wrap(bar.project.to_owned(), medium(12.0), t::TEXT);
     let state = if bar.modified { "Edited" } else { "Saved" };
@@ -272,20 +272,20 @@ pub fn shortcuts(ctx: &egui::Context, commands: &mut Vec<AppCommand>) {
     });
 }
 
-fn window_controls(ui: &mut Ui, maximised: bool, actions: &mut Vec<WindowAction>) {
-    // Right to left: close, maximise, minimise.
+fn window_controls(ui: &mut Ui, maximized: bool, actions: &mut Vec<WindowAction>) {
+    // Right to left: close, maximize, minimize.
     let controls = [
         (icons::CLOSE, "Close", WindowAction::Close),
         (
-            if maximised {
+            if maximized {
                 icons::RESTORE
             } else {
-                icons::MAXIMISE
+                icons::MAXIMIZE
             },
-            if maximised { "Restore" } else { "Maximise" },
-            WindowAction::ToggleMaximise,
+            if maximized { "Restore" } else { "Maximize" },
+            WindowAction::ToggleMaximize,
         ),
-        (icons::MINIMISE, "Minimise", WindowAction::Minimise),
+        (icons::MINIMIZE, "Minimize", WindowAction::Minimize),
     ];
     for (icon, label, action) in controls {
         let (rect, response) = ui.allocate_exact_size(vec2(44.0, TITLE_BAR_HEIGHT), Sense::click());
@@ -294,13 +294,13 @@ fn window_controls(ui: &mut Ui, maximised: bool, actions: &mut Vec<WindowAction>
             let fill = if close { t::CLOSE_HOVER } else { t::RAISED2 };
             ui.painter().rect_filled(rect, CornerRadius::ZERO, fill);
         }
-        let colour = if response.hovered() {
+        let color = if response.hovered() {
             t::TEXT_BRIGHT
         } else {
             t::TEXT2
         };
         let icon_rect = Rect::from_center_size(rect.center(), vec2(14.0, 14.0));
-        icons::paint(ui.painter(), icon_rect, icon, colour, 1.4, false);
+        icons::paint(ui.painter(), icon_rect, icon, color, 1.4, false);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
         if response.clicked() {
             actions.push(action);
@@ -333,13 +333,13 @@ pub fn icon_button(ui: &mut Ui, icon: &str, enabled: bool) -> egui::Response {
         ui.painter()
             .rect_filled(rect, CornerRadius::same(3), t::RAISED2);
     }
-    let colour = match (enabled, response.hovered()) {
+    let color = match (enabled, response.hovered()) {
         (false, _) => t::TEXT_DISABLED,
         (true, true) => t::TEXT_BRIGHT,
         (true, false) => t::TEXT2,
     };
     let icon_rect = Rect::from_center_size(rect.center(), vec2(15.0, 15.0));
-    icons::paint(ui.painter(), icon_rect, icon, colour, 1.6, false);
+    icons::paint(ui.painter(), icon_rect, icon, color, 1.6, false);
     response
 }
 

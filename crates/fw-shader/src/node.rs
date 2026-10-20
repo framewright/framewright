@@ -1,12 +1,12 @@
-//! A shader node's behaviour: its WGSL body wrapped so it sees its inputs and
+//! A shader node's behavior: its WGSL body wrapped so it sees its inputs and
 //! parameters by name, added to plans as a per-pixel operation.
 
 use std::sync::Arc;
 
 use fw_plugin::kernel::{FusedOp, kernel};
 use fw_plugin::{
-    ImageBehaviour, ImageHandle, NodeError, NodeTypeDesc, ParamDesc, ParamKind, ParamValue,
-    PixelOp, PlanBuilder, Request, ResolvedParams,
+    ImageBehavior, ImageHandle, NodeError, NodeTypeDesc, ParamDesc, ParamKind, ParamValue, PixelOp,
+    PlanBuilder, Request, ResolvedParams,
 };
 
 /// How many parameter slots a parameter of `kind` takes, and the WGSL that
@@ -188,7 +188,7 @@ pub(crate) struct ShaderNode {
     pub problem: Option<String>,
 }
 
-impl ImageBehaviour for ShaderNode {
+impl ImageBehavior for ShaderNode {
     fn emit(
         &self,
         params: &ResolvedParams,
@@ -212,7 +212,7 @@ impl ImageBehaviour for ShaderNode {
                 (_, ParamValue::Int(v)) => values.push(*v as f32),
                 (_, ParamValue::Bool(b)) => values.push(if *b { 1.0 } else { 0.0 }),
                 (_, ParamValue::Vec2(v)) => values.extend(v.map(|v| v as f32)),
-                // Colours arrive in the space the node works in.
+                // Colors arrive in the space the node works in.
                 (_, ParamValue::Color(color)) => {
                     let [r, g, b, a] = color.rgba;
                     let [r, g, b] = color.space.convert([r, g, b], space);

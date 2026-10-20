@@ -160,7 +160,7 @@ pub fn viewer(ui: &mut Ui, state: &ViewerState, commands: &mut Vec<AppCommand>) 
             ui.painter()
                 .rect_filled(b, CornerRadius::same(3), t::RAISED2);
         }
-        let colour = match (enabled, response.hovered()) {
+        let color = match (enabled, response.hovered()) {
             (false, _) => t::TEXT_DISABLED,
             (true, true) => t::TEXT_BRIGHT,
             (true, false) => t::TEXT2,
@@ -168,7 +168,7 @@ pub fn viewer(ui: &mut Ui, state: &ViewerState, commands: &mut Vec<AppCommand>) 
         let big = icon == icons::PLAY || icon == icons::PAUSE;
         let size = if big { 17.0 } else { 15.0 };
         let icon_rect = Rect::from_center_size(b.center(), vec2(size, size));
-        icons::paint(ui.painter(), icon_rect, icon, colour, 1.6, big);
+        icons::paint(ui.painter(), icon_rect, icon, color, 1.6, big);
         let response = response.on_hover_text(tip);
         if let (true, Some(command)) = (response.clicked(), command) {
             commands.push(command);
@@ -177,7 +177,7 @@ pub fn viewer(ui: &mut Ui, state: &ViewerState, commands: &mut Vec<AppCommand>) 
     }
 }
 
-/// `aspect` (width over height) fitted inside `area`, centred.
+/// `aspect` (width over height) fitted inside `area`, centered.
 fn fit(area: Rect, aspect: f32) -> Rect {
     if area.width() <= 0.0 || area.height() <= 0.0 || !aspect.is_finite() || aspect <= 0.0 {
         return Rect::from_center_size(area.center(), egui::Vec2::ZERO);

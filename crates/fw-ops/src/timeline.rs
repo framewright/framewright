@@ -5,7 +5,7 @@
 //! compactly until it changes.
 
 use fw_plugin::{
-    AudioBehaviour, AudioBlock, AudioProcessor, CLIP_TYPE, ContainerKind, ImageBehaviour,
+    AudioBehavior, AudioBlock, AudioProcessor, CLIP_TYPE, ContainerKind, ImageBehavior,
     ImageHandle, NodeError, NodeType, NodeTypeDesc, ParamDesc, PixelOp, PlanBuilder, PortDesc,
     PortType, Request, ResolvedParams, TIMELINE_TYPE, Unit,
 };
@@ -36,7 +36,7 @@ pub fn clip_type() -> NodeType {
         outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
         params: vec![
             ParamDesc::media("file", "File"),
-            ParamDesc::choice("space", "Colour space", &SPACE_CHOICES, "auto"),
+            ParamDesc::choice("space", "Color space", &SPACE_CHOICES, "auto"),
             ParamDesc::float("opacity", "Opacity", Unit::Percent, 100.0)
                 .soft_range(0.0, 100.0)
                 .hard_range(0.0, 100.0),
@@ -58,7 +58,7 @@ pub fn clip_type() -> NodeType {
 
 struct Clip;
 
-impl ImageBehaviour for Clip {
+impl ImageBehavior for Clip {
     /// The clip's media, which its graph's Input node stands for.
     fn source(
         &self,
@@ -87,7 +87,7 @@ impl ImageBehaviour for Clip {
         if opacity == 1.0 {
             return Ok(image);
         }
-        // Scaling premultiplied pixels fades them in any colour space.
+        // Scaling premultiplied pixels fades them in any color space.
         let op = PixelOp {
             label: "opacity".into(),
             wgsl: "return c * prm(base, 0u);".into(),
@@ -104,7 +104,7 @@ pub const COMPOSITE_CHOICES: [(&str, &str); 2] = [("normal", "Normal"), ("add", 
 /// A clip's sound: its media's audio at the clip's Volume.
 struct ClipAudio;
 
-impl AudioBehaviour for ClipAudio {
+impl AudioBehavior for ClipAudio {
     fn create(&self) -> Box<dyn AudioProcessor> {
         Box::new(Gain)
     }

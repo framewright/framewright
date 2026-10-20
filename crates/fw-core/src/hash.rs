@@ -1,7 +1,7 @@
 //! Content hashing for cache keys and media fingerprints.
 //!
 //! Keys are built from explicit, canonical bytes. Never hash `Debug` output or
-//! serialised JSON: both can change without the value changing.
+//! serialized JSON: both can change without the value changing.
 
 use std::fmt;
 use std::str::FromStr;
