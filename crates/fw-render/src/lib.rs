@@ -26,7 +26,7 @@ use fw_plugin::ImageHandle;
 use half::f16;
 use half::slice::HalfFloatSliceExt;
 
-pub use cache::{Cached, DEFAULT_GPU_CACHE_BYTES, RamCache};
+pub use cache::{Cached, DEFAULT_FRAME_CACHE_BYTES, DEFAULT_GPU_CACHE_BYTES, RamCache};
 pub use display::{Display, DisplayView, SurfaceEncoding};
 pub use gpu::Gpu;
 
@@ -65,6 +65,13 @@ pub struct Stats {
 pub struct GpuImage {
     pub texture: wgpu::Texture,
     pub space: ColorSpace,
+}
+
+/// A frame's key in the cache, apart from the same plan's read-back image.
+fn frame_key(plan: &Plan) -> ContentHash {
+    fw_core::KeyHasher::new("fw-render frame")
+        .hash(&plan.output_key())
+        .finish()
 }
 
 pub struct Renderer {
@@ -194,6 +201,25 @@ impl Renderer {
         }
     }
 
+    /// Keeps up to `bytes` of finished frames from [`Renderer::render_gpu`]
+    /// in GPU memory, so showing one again costs nothing: the frame cache.
+    /// Off (0) by default.
+    pub fn with_frame_cache(mut self, bytes: usize) -> Renderer {
+        self.cache.set_frame_budget(bytes);
+        self
+    }
+
+    /// Whether the plan's frame is in the frame cache.
+    pub fn has_frame(&self, plan: &Plan) -> bool {
+        self.cache.contains(&frame_key(plan))
+    }
+
+    /// Entries evicted from the cache to make room, ever. When it hasn't
+    /// changed, nothing has left the frame cache.
+    pub fn evictions(&self) -> u64 {
+        self.cache.evictions()
+    }
+
     pub fn gpu(&self) -> &Arc<Gpu> {
         &self.gpu
     }
@@ -242,6 +268,11 @@ impl Renderer {
         decoder: &dyn Decoder,
     ) -> Result<GpuImage, RenderError> {
         self.stats.renders += 1;
+        let key = frame_key(plan);
+        if let Some(Cached::Frame(hit)) = self.cache.get(&key) {
+            self.stats.cache_hits += 1;
+            return Ok(hit);
+        }
         let scope = self
             .gpu
             .device
@@ -255,10 +286,12 @@ impl Renderer {
             self.flush_rejected();
             return Err(RenderError::Gpu(error.to_string()));
         }
-        Ok(GpuImage {
+        let image = GpuImage {
             texture,
             space: plan.output_space,
-        })
+        };
+        self.cache.insert(key, Cached::Frame(image.clone()));
+        Ok(image)
     }
 
     /// Records the plan's work. Returns the output texture, which the caller

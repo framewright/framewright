@@ -11,13 +11,12 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-fw-audio.workspace = true
 fw-compile.workspace = true
 fw-core.workspace = true
 fw-doc.workspace = true
+fw-engine.workspace = true
 fw-media.workspace = true
 fw-ops.workspace = true
-fw-playback.workspace = true
 fw-plugin.workspace = true
 fw-render.workspace = true
 

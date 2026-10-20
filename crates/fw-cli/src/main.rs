@@ -272,117 +272,78 @@ fn play(
     no_audio: bool,
     no_copies: bool,
 ) -> Result<(), String> {
-    use fw_audio::{AudioEngine, MasterClock, WallClock};
-    use fw_playback::{DocumentFrames, Player};
-
-    let registry = Arc::new(fw_ops::builtin_registry());
-    let doc = fw_doc::save::load(project, &registry).map_err(|e| e.to_string())?;
-    let folder = project.parent().unwrap_or(Path::new("."));
-    let (rate, sample_rate) = match doc.timeline(doc.root()) {
-        Some(t) => (t.settings.rate, t.settings.sample_rate),
-        None => (Time::from_seconds(24), 48000),
-    };
-    let plan = fw_compile::compile_audio(&doc, &registry, &ProjectMedia::new(folder))
-        .map_err(|e| e.to_string())?;
-
-    // When sound plays, its sample count is the master clock.
-    let from_sample = from.sample_index(sample_rate).map_err(|e| e.to_string())?;
-    let mut audio = None;
-    let wall = Arc::new(WallClock::starting_at(from));
-    let clock: Arc<dyn MasterClock> = if no_audio || plan.voices.is_empty() {
-        wall.clone()
-    } else {
-        let (engine, mixer) = AudioEngine::new(sample_rate, fw_audio::output::MAX_FRAMES);
-        match fw_audio::start_output(mixer, engine.clock().clone(), sample_rate) {
-            Ok(output) => {
-                println!("audio: {} at {} Hz", output.device, output.rate);
-                // Hold at the start until the sound begins.
-                engine.clock().advance_to(from_sample);
-                let clock: Arc<dyn MasterClock> = engine.clock().clone();
-                audio = Some((engine, output));
-                clock
-            }
-            Err(e) => {
-                eprintln!("fw: {e}; playing pictures only, timed by the wall clock");
-                wall.clone()
-            }
-        }
-    };
+    use fw_engine::{Engine, Request, Settings};
 
     let gpu = Arc::new(Gpu::new().map_err(|e| e.to_string())?);
+    let settings = Settings {
+        editing_copies: !no_copies,
+        hardware: Some(hardware_policy()),
+        sound: !no_audio,
+        ..Settings::default()
+    };
+    let mut engine = Engine::open(project, gpu, settings).map_err(|e| e.to_string())?;
     println!(
         "video: {} at {} fps on {}",
         project.display(),
-        rate,
-        gpu.describe()
+        engine.frame_rate(),
+        engine.gpu().describe()
     );
-    let mut options = Options::at(from);
-    options.quality = fw_plugin::Quality::Draft;
-    let mut media = project_media(folder, !no_copies);
-    use_hardware(&mut media, &gpu);
-    let frames = DocumentFrames {
-        doc,
-        registry,
-        media,
-        renderer: Renderer::new(gpu, DEFAULT_CACHE_BYTES),
-        rate,
-        options,
+    let warn = |engine: &mut Engine| {
+        for warning in engine.take_warnings() {
+            eprintln!("fw: {warning}");
+        }
     };
-    let mut player = Player::new(Box::new(frames), clock.clone(), rate, 6);
+    warn(&mut engine);
 
-    // Start with the first frame ready, then let the clock run.
-    player.tick();
-    let first = from.frame_index(rate).map_err(|e| e.to_string())?;
-    if !player.wait_for(first, std::time::Duration::from_secs(10)) {
+    // Start with the first frame ready, then play.
+    engine
+        .request(Request::Seek { time: from })
+        .map_err(|e| e.to_string())?;
+    if !engine.wait_for_frame(std::time::Duration::from_secs(10)) {
         return Err("the first frame took longer than 10 s to render".into());
     }
-    match &mut audio {
-        Some((engine, _)) => engine.play(&plan, from_sample).map_err(|e| e.to_string())?,
-        None => wall.start(),
+    engine.request(Request::Play).map_err(|e| e.to_string())?;
+    warn(&mut engine);
+    if let Some(device) = engine.playback().sound {
+        println!("audio: {device}");
     }
     let end = from.as_f64() + seconds;
     let mut next_report = from.as_f64() + 1.0;
-    let mut last = player.stats().clone();
+    let mut last = engine.playback();
+    let mut serial = 0;
     let mut offsets: Vec<f64> = vec![];
-    while clock.now().as_f64() < end {
-        if let Some(shown) = player.tick() {
+    while engine.is_playing() && engine.playhead().as_f64() < end {
+        if let Some(frame) = engine.viewer_frame()
+            && frame.serial != serial
+        {
+            serial = frame.serial;
+            let time = frame.time.as_f64();
             // Lateness: how far into its own frame the clock is when it appears.
-            offsets.push((clock.now().as_f64() - shown.time.as_f64()) * 1000.0);
+            offsets.push((engine.playhead().as_f64() - time) * 1000.0);
         }
-        let now = clock.now().as_f64();
+        let now = engine.playhead().as_f64();
         if now >= next_report {
-            let stats = player.stats();
-            let underruns = audio
-                .as_ref()
-                .map(|(e, _)| {
-                    e.stats()
-                        .underruns
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                })
-                .unwrap_or(0);
+            let status = engine.playback();
             let (mean, worst) = summarise(&offsets);
             println!(
-                "{now:7.2}s  shown {:3}  dropped {:3}  audio underruns {underruns}  frame lateness mean {mean:5.1} ms, worst {worst:5.1} ms",
-                stats.shown - last.shown,
-                stats.dropped - last.dropped,
+                "{now:7.2}s  shown {:3}  dropped {:3}  audio underruns {}  frame lateness mean {mean:5.1} ms, worst {worst:5.1} ms",
+                status.shown - last.shown,
+                status.dropped - last.dropped,
+                status.underruns,
             );
-            last = stats.clone();
+            last = status;
             offsets.clear();
             next_report += 1.0;
         }
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
-    let stats = player.stats();
+    engine.request(Request::Pause).map_err(|e| e.to_string())?;
+    let status = engine.playback();
     println!(
         "played {seconds} s: {} frames shown, {} dropped, {} failed",
-        stats.shown, stats.dropped, stats.errors
+        status.shown, status.dropped, status.errors
     );
-    if let Some((engine, _output)) = &mut audio {
-        engine.stop();
-        for e in engine.take_errors() {
-            eprintln!("fw: audio: {e}");
-        }
-    }
+    warn(&mut engine);
     Ok(())
 }
 

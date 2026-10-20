@@ -149,6 +149,11 @@ impl App {
         }
     }
 
+    /// Shows `message` in the workspace bar, as the last thing to report.
+    pub fn report(&mut self, message: String) {
+        self.message = Some(message);
+    }
+
     pub fn select(&mut self, node: Option<NodeId>) {
         self.selected = node;
     }
@@ -198,7 +203,12 @@ impl App {
             Some(message) => message.clone(),
             None => describe(engine),
         };
-        let right = format!("Draft · {}", self.gpu_name);
+        let status = engine.playback();
+        let right = match status.dropped {
+            0 => format!("Draft · {}", self.gpu_name),
+            1 => format!("1 frame dropped · Draft · {}", self.gpu_name),
+            n => format!("{n} frames dropped · Draft · {}", self.gpu_name),
+        };
         egui::Panel::bottom("workspace-bar")
             .exact_size(chrome::WORKSPACE_BAR_HEIGHT)
             .frame(egui::Frame::new().fill(t::CHROME))
@@ -290,6 +300,9 @@ impl App {
                     gesture: None,
                 }
             }
+            AppCommand::PlayPause if engine.is_playing() => Request::Pause,
+            AppCommand::PlayPause | AppCommand::Play => Request::Play,
+            AppCommand::Pause => Request::Pause,
             AppCommand::Quit => {
                 self.actions.push(WindowAction::Close);
                 return;
@@ -383,6 +396,7 @@ impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
                     playhead: self.engine.playhead(),
                     duration: self.engine.duration(),
                     rate: self.engine.frame_rate(),
+                    playing: self.engine.is_playing(),
                 };
                 viewer::viewer(ui, &state, self.commands);
             }

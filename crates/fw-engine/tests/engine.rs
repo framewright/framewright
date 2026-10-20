@@ -83,6 +83,7 @@ fn open(path: &Path) -> Engine {
     let gpu = Arc::new(Gpu::new().unwrap());
     let settings = Settings {
         editing_copies: false,
+        sound: false,
         ..Settings::default()
     };
     Engine::open(path, gpu, settings).unwrap()
@@ -198,5 +199,109 @@ fn requests_and_events_are_plain_data() {
         Request::Seek {
             time: "3/2".parse().unwrap()
         }
+    );
+}
+
+/// Asks for frames until `done` or `seconds` pass; true if it was done.
+fn until(engine: &mut Engine, seconds: u64, mut done: impl FnMut(&mut Engine) -> bool) -> bool {
+    let end = std::time::Instant::now() + Duration::from_secs(seconds);
+    while std::time::Instant::now() < end {
+        engine.viewer_frame();
+        if done(engine) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    false
+}
+
+#[test]
+fn plays_from_the_playhead_and_stops_at_the_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("project.json");
+    write_project(&path, &fw_testmedia::count_24fps());
+    let mut engine = open(&path);
+    engine
+        .request(Request::Seek {
+            time: "3/2".parse().unwrap(),
+        })
+        .unwrap();
+    assert!(engine.wait_for_frame(Duration::from_secs(20)));
+    engine.request(Request::Play).unwrap();
+    assert!(engine.is_playing());
+    assert_eq!(
+        engine.take_events(),
+        [Event::Transport {
+            playing: true,
+            time: "3/2".parse().unwrap()
+        }]
+    );
+    // The clip ends at 2 s: playing stops on its last frame.
+    assert!(
+        until(&mut engine, 10, |e| !e.is_playing()),
+        "stopped by itself"
+    );
+    assert_eq!(
+        engine.playhead(),
+        Time::of_frame(47, Time::from_seconds(24)).unwrap()
+    );
+    assert!(engine.wait_for_frame(Duration::from_secs(20)));
+    assert_eq!(engine.viewer_frame().unwrap().index, 47);
+    let status = engine.playback();
+    assert!(
+        status.shown >= 5,
+        "frames were shown while playing: {status:?}"
+    );
+
+    // Playing again from the end starts over.
+    engine.request(Request::Play).unwrap();
+    assert!(engine.playhead() < Time::from_seconds(1));
+    engine.request(Request::Pause).unwrap();
+    let at = engine.playhead();
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(engine.playhead(), at, "paused holds still");
+    assert_eq!(
+        at,
+        Time::of_frame(
+            at.frame_index(Time::from_seconds(24)).unwrap(),
+            Time::from_seconds(24)
+        )
+        .unwrap(),
+        "on a frame's start"
+    );
+}
+
+#[test]
+fn the_frame_cache_keeps_frames_an_edit_and_its_undo_leave_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("project.json");
+    let clip = write_project(&path, &fw_testmedia::count_24fps());
+    let mut engine = open(&path);
+    engine.request(Request::Play).unwrap();
+    assert!(until(&mut engine, 10, |e| !e.is_playing()));
+    let cached = |e: &Engine| e.cached_frames().iter().map(|(a, b)| b - a).sum::<i64>();
+    assert!(
+        until(&mut engine, 10, |e| cached(e) >= 40),
+        "played frames are cached: {:?}",
+        engine.cached_frames()
+    );
+
+    engine
+        .request(Request::Edit {
+            label: "Opacity".into(),
+            commands: vec![opacity(clip, 50.0)],
+            gesture: None,
+        })
+        .unwrap();
+    assert!(
+        until(&mut engine, 10, |e| cached(e) <= 1),
+        "every frame changed: {:?}",
+        engine.cached_frames()
+    );
+    engine.request(Request::Undo).unwrap();
+    assert!(
+        until(&mut engine, 10, |e| cached(e) >= 40),
+        "after undo the old frames count again: {:?}",
+        engine.cached_frames()
     );
 }

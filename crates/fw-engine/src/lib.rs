@@ -9,22 +9,35 @@
 //! frame to show as a texture on the engine's GPU, because showing it must
 //! not copy.
 //!
-//! TODO: playing with sound, the command journal, serving requests over a
-//! socket (`fw-script`).
+//! TODO: the command journal, serving requests over a socket (`fw-script`).
+
+mod frames;
+mod media;
+mod sound;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fw_audio::FakeClock;
+use fw_audio::{MasterClock, WallClock};
 use fw_compile::Options;
 use fw_core::Time;
 use fw_doc::{Command, CommandError, Document, Editor};
 use fw_media::{HardwarePolicy, ProjectMedia};
-use fw_playback::{DocumentFrames, FrameSource, Player};
+use fw_playback::{DocumentFrames, Player, Transport};
 use fw_plugin::{Quality, Registry};
-use fw_render::{DEFAULT_CACHE_BYTES, Gpu, GpuImage, Renderer};
+use fw_render::{DEFAULT_CACHE_BYTES, DEFAULT_FRAME_CACHE_BYTES, Gpu, GpuImage, Renderer};
 use serde::{Deserialize, Serialize};
+
+pub use media::{MediaSummary, Picture};
+
+use crate::frames::{Edited, Latest, SharedLatest};
+use crate::sound::Sound;
+
+/// How long sound keeps playing what it was given after an edit, so a drag
+/// restarts it once rather than on every step.
+/// TODO: change parameters on the audio thread without restarting.
+const SOUND_SETTLE: Duration = Duration::from_millis(200);
 
 /// What clients ask the engine to do.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,10 +53,14 @@ pub enum Request {
     },
     Undo,
     Redo,
-    /// Moves the playhead.
+    /// Moves the playhead, playing on from there if playing.
     Seek {
         time: Time,
     },
+    /// Plays from the playhead, with sound when there is some; from the
+    /// start when the playhead is at the end.
+    Play,
+    Pause,
     /// Writes the document to its file.
     Save,
 }
@@ -56,6 +73,11 @@ pub enum Event {
     Document(fw_doc::Event),
     Saved {
         path: PathBuf,
+    },
+    /// Playing started or stopped, at `time`.
+    Transport {
+        playing: bool,
+        time: Time,
     },
 }
 
@@ -72,13 +94,18 @@ pub enum EngineError {
     },
 }
 
-/// How an engine reads media.
+/// How an engine reads media and plays.
 #[derive(Debug, Clone, Copy)]
 pub struct Settings {
     /// Make editing copies of videos in the background, and scrub from them.
     pub editing_copies: bool,
     /// Decode in hardware when the GPU can, as the policy says; `None` never.
     pub hardware: Option<HardwarePolicy>,
+    /// Play sound through the default audio device. Without it, playing
+    /// keeps time by the wall clock.
+    pub sound: bool,
+    /// GPU memory for keeping finished frames, so showing them again is free.
+    pub frame_cache_bytes: usize,
 }
 
 impl Default for Settings {
@@ -86,36 +113,25 @@ impl Default for Settings {
         Settings {
             editing_copies: true,
             hardware: Some(HardwarePolicy::Fastest),
+            sound: true,
+            frame_cache_bytes: DEFAULT_FRAME_CACHE_BYTES,
         }
     }
 }
 
-/// A media file the document uses.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MediaSummary {
-    /// As the document refers to it.
-    pub path: String,
-    /// Empty when the file couldn't be read.
+/// How playing is going.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlaybackStatus {
+    pub playing: bool,
+    /// Frames shown and dropped, and frames that failed, since opening.
+    pub shown: u64,
+    pub dropped: u64,
+    pub errors: u64,
+    /// The audio device, once sound has played.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub picture: Option<Picture>,
-    pub has_audio: bool,
-    /// How many nodes use it.
-    pub users: usize,
-    /// Why the file couldn't be read.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Picture {
-    pub width: u32,
-    pub height: u32,
-    /// Frames, for a video; `None` for a still.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub frames: Option<u64>,
-    /// The frame rate, for a constant-rate video.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rate: Option<Time>,
+    pub sound: Option<String>,
+    /// Times the audio device asked for sound that wasn't ready.
+    pub underruns: u64,
 }
 
 /// The frame to show.
@@ -128,15 +144,28 @@ pub struct ViewerFrame<'a> {
     pub serial: u64,
 }
 
+/// The audio device, opened when sound first plays.
+enum SoundState {
+    Closed,
+    Open(Box<Sound>),
+    /// It couldn't be opened; playing keeps time by the wall clock.
+    Unavailable,
+}
+
 pub struct Engine {
     path: PathBuf,
     editor: Editor,
-    /// The document as playback should render it, replaced on every change.
-    latest: Arc<Mutex<Document>>,
+    settings: Settings,
+    /// The document as playback renders it, replaced on every change.
+    latest: SharedLatest,
     rate: Time,
-    /// Where the playhead is. TODO: the sample clock while playing.
-    clock: Arc<FakeClock>,
+    /// Timeline samples per second; `None` for a graph, which is silent.
+    sample_rate: Option<u32>,
+    transport: Arc<Transport>,
     player: Player<GpuImage>,
+    sound: SoundState,
+    /// When the document last changed while sound was playing.
+    sound_stale: Option<Instant>,
     serial: u64,
     saved_revision: u64,
     events: Vec<Event>,
@@ -170,33 +199,40 @@ impl Engine {
         {
             warnings.push(format!("decoding in software: {e}"));
         }
-        let rate = doc
-            .timeline(doc.root())
-            .map_or(Time::from_seconds(24), |t| t.settings.rate);
-        let latest = Arc::new(Mutex::new(doc.clone()));
+        let timeline = doc.timeline(doc.root()).map(|t| t.settings.clone());
+        let rate = timeline.as_ref().map_or(Time::from_seconds(24), |t| t.rate);
+        let latest = Arc::new(Mutex::new(Latest::new(doc.clone())));
         let mut options = Options::at(Time::ZERO);
         options.quality = Quality::Draft;
-        let frames = Edited {
-            latest: latest.clone(),
-            frames: DocumentFrames {
-                doc: doc.clone(),
-                registry: registry.clone(),
-                media,
-                renderer: Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES),
-                rate,
-                options,
-            },
+        let renderer = Renderer::new(gpu.clone(), DEFAULT_CACHE_BYTES)
+            .with_frame_cache(settings.frame_cache_bytes);
+        let frames = DocumentFrames {
+            doc: doc.clone(),
+            registry: registry.clone(),
+            media,
+            renderer,
+            rate,
+            options,
         };
-        let clock = Arc::new(FakeClock::new(Time::ZERO));
-        let mut player = Player::new(Box::new(frames), clock.clone(), rate, 6);
+        let transport = Arc::new(Transport::new(Time::ZERO));
+        let mut player = Player::new(
+            Box::new(Edited::new(latest.clone(), frames)),
+            transport.clone(),
+            rate,
+            6,
+        );
         player.set_playing(false);
         Ok(Engine {
             path: path.to_owned(),
             editor: Editor::new(doc, registry),
+            settings,
             latest,
             rate,
-            clock,
+            sample_rate: timeline.map(|t| t.sample_rate),
+            transport,
             player,
+            sound: SoundState::Closed,
+            sound_stale: None,
             serial: 0,
             saved_revision: 0,
             events: vec![],
@@ -238,8 +274,16 @@ impl Engine {
                 } else {
                     time
                 };
-                self.clock.set(time);
+                if self.is_playing() {
+                    self.stop_sound();
+                    let clock = self.start_clock(time);
+                    self.transport.follow(clock);
+                } else {
+                    self.transport.hold(time);
+                }
             }
+            Request::Play => self.play(),
+            Request::Pause => self.pause(),
             Request::Save => {
                 fw_doc::save::save(self.editor.doc(), &self.path).map_err(|source| {
                     EngineError::Save {
@@ -261,14 +305,20 @@ impl Engine {
         std::mem::take(&mut self.events)
     }
 
-    /// Problems met while opening that didn't stop it, such as falling back
-    /// to software decoding.
+    /// Problems that didn't stop anything, such as falling back to
+    /// software decoding or playing without sound.
     pub fn take_warnings(&mut self) -> Vec<String> {
+        if let SoundState::Open(sound) = &self.sound {
+            self.warnings.extend(sound.take_errors());
+        }
         std::mem::take(&mut self.warnings)
     }
 
     /// The frame to show now. Call once per display refresh.
     pub fn viewer_frame(&mut self) -> Option<ViewerFrame<'_>> {
+        if self.is_playing() {
+            self.keep_playing();
+        }
         if self.player.tick().is_some() {
             self.serial += 1;
         }
@@ -307,11 +357,40 @@ impl Engine {
         false
     }
 
+    pub fn is_playing(&self) -> bool {
+        self.transport.is_running()
+    }
+
+    pub fn playback(&self) -> PlaybackStatus {
+        let stats = self.player.stats();
+        let (sound, underruns) = match &self.sound {
+            SoundState::Open(s) => (Some(s.device.clone()), s.underruns()),
+            _ => (None, 0),
+        };
+        PlaybackStatus {
+            playing: self.is_playing(),
+            shown: stats.shown,
+            dropped: stats.dropped,
+            errors: stats.errors,
+            sound,
+            underruns,
+        }
+    }
+
+    /// Runs of frames the frame cache holds for the current document, as
+    /// `[start, end)` frame indices.
+    pub fn cached_frames(&self) -> Vec<(i64, i64)> {
+        self.latest
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cached_ranges()
+    }
+
     /// The media files the document uses, in the order first used.
     pub fn media(&mut self) -> &[MediaSummary] {
         let revision = self.editor.revision();
         if self.media.as_ref().map(|m| m.0) != Some(revision) {
-            let summaries = summarise_media(self.editor.doc(), &self.info);
+            let summaries = media::summarise_media(self.editor.doc(), &self.info);
             self.media = Some((revision, summaries));
         }
         &self.media.as_ref().expect("just filled").1
@@ -352,8 +431,7 @@ impl Engine {
     }
 
     pub fn playhead(&self) -> Time {
-        use fw_audio::MasterClock;
-        self.clock.now()
+        self.transport.now()
     }
 
     /// Where the last clip ends; zero for a graph or an empty timeline.
@@ -365,77 +443,153 @@ impl Engine {
     }
 
     fn changed(&mut self, event: fw_doc::Event) {
-        *self.latest.lock().unwrap_or_else(|e| e.into_inner()) = self.editor.doc().clone();
-        self.player.invalidate();
-        self.events.push(Event::Document(event));
-    }
-}
-
-fn summarise_media(doc: &Document, media: &ProjectMedia) -> Vec<MediaSummary> {
-    use fw_compile::{FrameTimes, MediaResolver};
-    let mut summaries: Vec<MediaSummary> = vec![];
-    let mut nodes: Vec<_> = doc.nodes().collect();
-    // Timeline clips in time order, so the list reads like the edit.
-    let placements = doc.timeline(doc.root()).map(|t| t.clips.clone());
-    nodes.sort_by_key(|(id, _)| placements.as_ref().and_then(|p| p.get(id).map(|p| p.start)));
-    for (_, node) in nodes {
-        let Some(known) = node.as_known() else {
-            continue;
-        };
-        for param in known.params.values() {
-            let fw_doc::Param::Constant(fw_plugin::ParamValue::Media(reference)) = param else {
-                continue;
-            };
-            if reference.path.is_empty() {
-                continue;
-            }
-            if let Some(summary) = summaries.iter_mut().find(|s| s.path == reference.path) {
-                summary.users += 1;
-                continue;
-            }
-            let (picture, has_audio, error) = match media.probe(reference) {
-                Ok(info) => {
-                    let picture = Picture {
-                        width: info.width,
-                        height: info.height,
-                        frames: info.frames.as_ref().map(FrameTimes::count),
-                        rate: match info.frames {
-                            Some(FrameTimes::Constant { rate, .. }) => Some(rate),
-                            _ => None,
-                        },
-                    };
-                    (Some(picture), info.has_audio, None)
-                }
-                Err(e) => (None, false, Some(e)),
-            };
-            summaries.push(MediaSummary {
-                path: reference.path.clone(),
-                picture,
-                has_audio,
-                users: 1,
-                error,
-            });
-        }
-    }
-    summaries
-}
-
-/// Renders frames of the latest document.
-struct Edited {
-    latest: Arc<Mutex<Document>>,
-    frames: DocumentFrames,
-}
-
-impl FrameSource for Edited {
-    type Frame = GpuImage;
-
-    fn frame(&mut self, index: i64) -> Result<GpuImage, String> {
-        // A cheap clone: the document is made of persistent maps.
-        self.frames.doc = self
-            .latest
+        self.latest
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        self.frames.frame(index)
+            .replace(self.editor.doc().clone());
+        self.player.invalidate();
+        if self.is_playing() {
+            self.sound_stale = Some(Instant::now());
+        }
+        self.media = None;
+        self.events.push(Event::Document(event));
+    }
+
+    fn play(&mut self) {
+        if self.is_playing() {
+            return;
+        }
+        let mut from = self.frame_start(self.playhead());
+        let end = self.duration();
+        if end > Time::ZERO && self.last_frame().is_some_and(|last| from >= last) {
+            from = Time::ZERO;
+        }
+        self.player.set_playing(true);
+        let clock = self.start_clock(from);
+        self.transport.follow(clock);
+        self.events.push(Event::Transport {
+            playing: true,
+            time: from,
+        });
+    }
+
+    fn pause(&mut self) {
+        if !self.is_playing() {
+            return;
+        }
+        let at = self.frame_start(self.playhead());
+        self.stop_sound();
+        self.transport.hold(at);
+        self.player.set_playing(false);
+        self.sound_stale = None;
+        self.events.push(Event::Transport {
+            playing: false,
+            time: at,
+        });
+    }
+
+    /// Upkeep while playing: stop at the end, and let sound catch up with
+    /// edits once they settle.
+    fn keep_playing(&mut self) {
+        if let Some(last) = self.last_frame()
+            && self.playhead() >= last
+        {
+            self.pause();
+            self.transport.hold(last);
+            return;
+        }
+        if self
+            .sound_stale
+            .is_some_and(|t| t.elapsed() >= SOUND_SETTLE)
+        {
+            self.sound_stale = None;
+            let plan = self.audio_plan();
+            let same = match (&self.sound, &plan) {
+                (SoundState::Open(sound), Some(plan)) => sound.is_playing(plan),
+                (SoundState::Open(_), None) => false,
+                // Not playing sound; a plan with voices would start some.
+                (_, plan) => plan.is_none(),
+            };
+            if !same {
+                let now = self.playhead();
+                self.stop_sound();
+                let clock = self.start_clock(now);
+                self.transport.follow(clock);
+            }
+        }
+    }
+
+    /// Starts sound from `from` and returns its clock, or the wall clock
+    /// when there's no sound to play.
+    fn start_clock(&mut self, from: Time) -> Arc<dyn MasterClock> {
+        if let (Some(plan), Some(rate)) = (self.audio_plan(), self.sample_rate)
+            && let Some(sound) = self.open_sound(rate)
+        {
+            let started = from
+                .sample_index(rate)
+                .map_err(|e| e.to_string())
+                .and_then(|sample| sound.play(&plan, sample));
+            match started {
+                Ok(clock) => return clock,
+                Err(e) => self.warnings.push(format!("playing without sound: {e}")),
+            }
+        }
+        let wall = Arc::new(WallClock::starting_at(from));
+        wall.start();
+        wall
+    }
+
+    fn stop_sound(&mut self) {
+        if let SoundState::Open(sound) = &mut self.sound {
+            sound.stop();
+        }
+    }
+
+    fn open_sound(&mut self, rate: u32) -> Option<&mut Sound> {
+        if matches!(self.sound, SoundState::Closed) {
+            self.sound = match Sound::open(rate) {
+                Ok(sound) => SoundState::Open(Box::new(sound)),
+                Err(e) => {
+                    self.warnings.push(format!("playing without sound: {e}"));
+                    SoundState::Unavailable
+                }
+            };
+        }
+        match &mut self.sound {
+            SoundState::Open(sound) => Some(sound),
+            _ => None,
+        }
+    }
+
+    /// The document's sound, when sound is wanted and there is some.
+    fn audio_plan(&mut self) -> Option<fw_compile::AudioPlan> {
+        if !self.settings.sound {
+            return None;
+        }
+        let doc = self.editor.doc();
+        match fw_compile::compile_audio(doc, self.editor.registry(), &self.info) {
+            Ok(plan) if !plan.voices.is_empty() => Some(plan),
+            Ok(_) => None,
+            Err(e) => {
+                self.warnings.push(format!("playing without sound: {e}"));
+                None
+            }
+        }
+    }
+
+    fn frame_start(&self, t: Time) -> Time {
+        let index = t.frame_index(self.rate).unwrap_or(0);
+        Time::of_frame(index.max(0), self.rate).unwrap_or(Time::ZERO)
+    }
+
+    /// The start of the timeline's last frame; `None` when it's empty.
+    fn last_frame(&self) -> Option<Time> {
+        let end = self.duration();
+        if end <= Time::ZERO {
+            return None;
+        }
+        // The frame the moment just before the end falls in.
+        let frames = (end.as_f64() * self.rate.as_f64()).ceil() as i64;
+        Time::of_frame((frames - 1).max(0), self.rate).ok()
     }
 }

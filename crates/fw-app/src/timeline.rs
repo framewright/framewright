@@ -204,6 +204,19 @@ pub fn timeline(
     }
 
     ruler_ui(ui, view, ruler, lanes, rate, commands);
+    // Frames the frame cache holds, along the ruler's foot.
+    let foot = ui.painter_at(ruler);
+    for (start, end) in engine.cached_frames() {
+        let (a, b) = (start as f64 / rate.as_f64(), end as f64 / rate.as_f64());
+        let bar = Rect::from_min_max(
+            pos2(view.x(a, lanes), ruler.bottom() - 3.0),
+            pos2(
+                view.x(b, lanes).max(view.x(a, lanes) + 1.0),
+                ruler.bottom() - 1.0,
+            ),
+        );
+        foot.rect_filled(bar, CornerRadius::ZERO, t::SAVED.gamma_multiply(0.8));
+    }
     // The corner above the headers: where the playhead is.
     let corner = Rect::from_min_max(full.min, pos2(ruler.left(), ruler.bottom()));
     painter.rect_filled(corner, CornerRadius::ZERO, t::PANEL_HEADER);

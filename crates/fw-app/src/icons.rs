@@ -5,6 +5,7 @@
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2};
 
 pub const PLAY: &str = "M7 4l13 8-13 8z";
+pub const PAUSE: &str = "M7 5h3v14H7zM14 5h3v14h-3z";
 pub const SKIP_BACK: &str = "M19 20L9 12l10-8zM5 4v16";
 pub const SKIP_FWD: &str = "M5 4l10 8-10 8zM19 4v16";
 pub const STEP_BACK: &str = "M15 18l-6-6 6-6";

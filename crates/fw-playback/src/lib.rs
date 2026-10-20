@@ -27,6 +27,9 @@ pub trait FrameSource: Send {
     type Frame: Clone + Send + 'static;
 
     fn frame(&mut self, index: i64) -> Result<Self::Frame, String>;
+
+    /// Called when there's nothing to render, for upkeep that can wait.
+    fn idle(&mut self) {}
 }
 
 /// Frames of a document: compiled at `index / rate` and rendered to images
@@ -54,6 +57,51 @@ impl FrameSource for DocumentFrames {
         self.renderer
             .render_gpu(&plan, &self.media)
             .map_err(|e| e.to_string())
+    }
+}
+
+/// The clock an editor plays by: held at the playhead while paused, and
+/// following a running clock (the sound's, or the wall clock) while playing.
+pub struct Transport {
+    state: Mutex<TransportState>,
+}
+
+enum TransportState {
+    Held(Time),
+    Following(Arc<dyn MasterClock>),
+}
+
+impl Transport {
+    pub fn new(at: Time) -> Transport {
+        Transport {
+            state: Mutex::new(TransportState::Held(at)),
+        }
+    }
+
+    /// Stops at `at`.
+    pub fn hold(&self, at: Time) {
+        *self.state.lock().unwrap_or_else(|e| e.into_inner()) = TransportState::Held(at);
+    }
+
+    /// Runs with `clock` from now on.
+    pub fn follow(&self, clock: Arc<dyn MasterClock>) {
+        *self.state.lock().unwrap_or_else(|e| e.into_inner()) = TransportState::Following(clock);
+    }
+
+    pub fn is_running(&self) -> bool {
+        matches!(
+            *self.state.lock().unwrap_or_else(|e| e.into_inner()),
+            TransportState::Following(_)
+        )
+    }
+}
+
+impl MasterClock for Transport {
+    fn now(&self) -> Time {
+        match &*self.state.lock().unwrap_or_else(|e| e.into_inner()) {
+            TransportState::Held(t) => *t,
+            TransportState::Following(clock) => clock.now(),
+        }
     }
 }
 
@@ -289,7 +337,10 @@ fn render_ahead<F: Clone + Send + 'static>(
             let ready = shared.ready.lock().unwrap_or_else(|e| e.into_inner());
             (due + lead..=due + lead + ahead).find(|i| !ready.contains_key(i))
         };
-        let Some(index) = next else { continue };
+        let Some(index) = next else {
+            source.idle();
+            continue;
+        };
         let generation = shared.generation.load(Ordering::Acquire);
         let started = std::time::Instant::now();
         let result = source.frame(index);

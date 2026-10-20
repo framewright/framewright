@@ -234,6 +234,10 @@ impl Shell {
         }
         // TODO: react to events once panels cache what they show.
         engine.take_events();
+        for warning in engine.take_warnings() {
+            eprintln!("framewright: {warning}");
+            running.app.report(warning);
+        }
 
         let window = &mut running.window;
         running.app.maximised = window.window.is_maximized();
@@ -289,7 +293,8 @@ impl Shell {
             }
         }
         // Keep drawing while the engine's frame is on its way.
-        if !up_to_date || repaint.is_zero() || self.args.screenshot.is_some() {
+        if !up_to_date || engine.is_playing() || repaint.is_zero() || self.args.screenshot.is_some()
+        {
             window.window.request_redraw();
         } else if repaint < Duration::from_secs(3600) {
             self.next_frame = Some(Instant::now() + repaint);

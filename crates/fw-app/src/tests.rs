@@ -33,6 +33,7 @@ fn project() -> Project {
     let gpu = Arc::new(Gpu::new().unwrap());
     let settings = Settings {
         editing_copies: false,
+        sound: false,
         ..Settings::default()
     };
     let engine = Engine::open(&path, gpu, settings).unwrap();
@@ -250,4 +251,23 @@ fn delete_removes_the_selected_clip_and_undo_brings_it_back() {
     harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
     harness.run_steps(2);
     assert!(harness.state().1.document().contains(clip));
+}
+
+#[test]
+fn space_plays_and_pauses() {
+    let Project { _dir, engine, .. } = project();
+    let mut harness = harness(engine);
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Space);
+    harness.run_steps(1);
+    assert!(harness.state().1.is_playing());
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    harness.key_press(egui::Key::Space);
+    harness.run_steps(1);
+    let engine = &harness.state().1;
+    assert!(!engine.is_playing());
+    assert!(
+        engine.playhead() > Time::ZERO,
+        "the playhead moved while playing"
+    );
 }

@@ -29,6 +29,7 @@ pub struct ViewerState<'a> {
     pub playhead: Time,
     pub duration: Time,
     pub rate: Time,
+    pub playing: bool,
 }
 
 pub fn viewer(ui: &mut Ui, state: &ViewerState, commands: &mut Vec<AppCommand>) {
@@ -133,7 +134,11 @@ pub fn viewer(ui: &mut Ui, state: &ViewerState, commands: &mut Vec<AppCommand>) 
         mono(12.0),
         t::TEXT3,
     );
-    // TODO: play and pause, once the engine plays.
+    let (play, play_tip) = if state.playing {
+        (icons::PAUSE, "Pause (Space)")
+    } else {
+        (icons::PLAY, "Play (Space)")
+    };
     let buttons = [
         (icons::SKIP_BACK, "Go to start", Some(AppCommand::GoToStart)),
         (
@@ -141,7 +146,7 @@ pub fn viewer(ui: &mut Ui, state: &ViewerState, commands: &mut Vec<AppCommand>) 
             "Previous frame",
             Some(AppCommand::StepBack),
         ),
-        (icons::PLAY, "Playing isn't built yet", None),
+        (play, play_tip, Some(AppCommand::PlayPause)),
         (icons::STEP_FWD, "Next frame", Some(AppCommand::StepForward)),
         (icons::SKIP_FWD, "Go to end", Some(AppCommand::GoToEnd)),
     ];
@@ -160,16 +165,10 @@ pub fn viewer(ui: &mut Ui, state: &ViewerState, commands: &mut Vec<AppCommand>) 
             (true, true) => t::TEXT_BRIGHT,
             (true, false) => t::TEXT2,
         };
-        let size = if icon == icons::PLAY { 17.0 } else { 15.0 };
+        let big = icon == icons::PLAY || icon == icons::PAUSE;
+        let size = if big { 17.0 } else { 15.0 };
         let icon_rect = Rect::from_center_size(b.center(), vec2(size, size));
-        icons::paint(
-            ui.painter(),
-            icon_rect,
-            icon,
-            colour,
-            1.6,
-            icon == icons::PLAY,
-        );
+        icons::paint(ui.painter(), icon_rect, icon, colour, 1.6, big);
         let response = response.on_hover_text(tip);
         if let (true, Some(command)) = (response.clicked(), command) {
             commands.push(command);

@@ -33,6 +33,9 @@ pub enum AppCommand {
     Redo,
     /// Removes the selected clip or node.
     Delete,
+    PlayPause,
+    Play,
+    Pause,
     StepBack,
     StepForward,
     GoToStart,
@@ -191,6 +194,10 @@ fn menus(ui: &mut Ui, bar: &TitleBar, commands: &mut Vec<AppCommand>) {
     });
     ui.menu_button(title("Playback"), |ui| {
         ui.set_min_width(220.0);
+        item(ui, "Play / Pause", "Space", true, AppCommand::PlayPause);
+        item(ui, "Play", "L", true, AppCommand::Play);
+        item(ui, "Pause", "K", true, AppCommand::Pause);
+        ui.separator();
         item(ui, "Previous Frame", "←", true, AppCommand::StepBack);
         item(ui, "Next Frame", "→", true, AppCommand::StepForward);
         ui.separator();
@@ -223,6 +230,9 @@ pub fn shortcuts(ctx: &egui::Context, commands: &mut Vec<AppCommand>) {
         (Key::Home, AppCommand::GoToStart),
         (Key::End, AppCommand::GoToEnd),
         (Key::Delete, AppCommand::Delete),
+        (Key::Space, AppCommand::PlayPause),
+        (Key::L, AppCommand::Play),
+        (Key::K, AppCommand::Pause),
         (Key::Backspace, AppCommand::Delete),
     ];
     let typing = ctx.egui_wants_keyboard_input();

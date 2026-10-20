@@ -188,7 +188,8 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** There is **one** engine. There is no full duplicate CPU reference implementation of every effect; correctness comes from golden-image tests.
 - **[Decided]** (from the optimisation pass) **Showing a frame never reads it back.** `Renderer::render_gpu` leaves the frame in a GPU texture and returns once the work is queued. Playback holds these textures; its `FrameSource` is generic over the frame type, so its tests still use small CPU images. `Renderer::render` reads back, for `fw render`, export and tests. Budgets that time a frame wait until the GPU has finished it.
 
-- **[Proposed]** (step 3 plan) **The frame cache, the GPU-memory tier.** `Renderer::render_gpu` keeps finished frames in GPU memory by their plan's output key, within a budget (2 GiB by default). An edit changes the keys of exactly the frames it affects, so nothing is invalidated explicitly and untouched frames show at once. Frames playback rendered ahead are dropped after an edit, and the timeline shows which frames are cached.
+- **[Proposed]** (step 3 plan) **The frame cache, the GPU-memory tier.** `Renderer::render_gpu` keeps finished frames in GPU memory by their plan's output key, within a budget (2 GiB by default). An edit changes the keys of exactly the frames it affects, so nothing is invalidated explicitly and untouched frames show at once. Frames playback rendered ahead are dropped after an edit, and the timeline shows which frames are cached: the render thread, when idle, recompiles frames whose place is in doubt and checks their keys, so an undo brings cached frames back at once. It replaces working out invalidated time ranges from plan diffs.
+- **[Proposed]** (step 3) **Playing in the editor:** the transport holds the playhead while paused and follows the sound's sample clock while playing (the wall clock when there's no sound or no device). Play from the end starts over; playing stops on the last frame; seeking while playing plays on from there. Frames rendered before an edit are dropped at once, and sound picks up an edit 200 ms after edits stop arriving, so a drag restarts it once. Space plays and pauses, L plays, K pauses. TODO: changing sound parameters on the audio thread without restarting, J (playing backwards), and pre-rolling so the first second doesn't drop frames while the decoders calibrate.
 
 ## 8. Audio
 
@@ -206,7 +207,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - The master clock counts samples written, minus the device's reported latency, interpolated between blocks (capped at 50 ms so a stalled device stalls the picture rather than letting it drift).
   - Resampling uses FFmpeg's swresample inside `fw-media`, rather than `rubato`, because FFmpeg already decodes the audio.
   - Parameters are constant per clip for now. TODO: automation resolved per block.
-- **[Decided]** (from step 2) **Playback details:** the frame shown is always the one the clock says is due. A render thread renders ahead, aiming as far ahead as a frame takes to render (with 25% to spare). A missed frame holds the last one and is counted as dropped. Playback starts once the first frame is ready. TODO: use plan diffs to work out which time ranges an edit invalidates, for the playback cache.
+- **[Decided]** (from step 2) **Playback details:** the frame shown is always the one the clock says is due. A render thread renders ahead, aiming as far ahead as a frame takes to render (with 25% to spare). A missed frame holds the last one and is counted as dropped. Playback starts once the first frame is ready.
 
 ## 9. Document, persistence and undo
 

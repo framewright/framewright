@@ -233,6 +233,41 @@ fn caches_skip_repeated_work() {
 }
 
 #[test]
+fn the_frame_cache_shows_unchanged_frames_again_for_free() {
+    let mut s = scene();
+    let mut plain = Renderer::new(gpu(), DEFAULT_CACHE_BYTES);
+    plain.render_gpu(&plan(&s), &s.media).unwrap();
+    plain.render_gpu(&plan(&s), &s.media).unwrap();
+    assert_eq!(plain.stats().cache_hits, 0, "off unless asked for");
+
+    let mut renderer = Renderer::new(gpu(), DEFAULT_CACHE_BYTES).with_frame_cache(64 << 20);
+    let first = renderer.render_gpu(&plan(&s), &s.media).unwrap();
+    assert!(renderer.has_frame(&plan(&s)));
+    let again = renderer.render_gpu(&plan(&s), &s.media).unwrap();
+    assert_eq!(
+        again.texture, first.texture,
+        "the same texture, from the cache"
+    );
+    assert_eq!(
+        (renderer.stats().cache_hits, renderer.stats().kernels),
+        (1, 1)
+    );
+
+    // An edit changes the key: a new frame, while the old one stays cached.
+    let before = plan(&s);
+    s.editor
+        .apply(
+            "Exposure",
+            vec![set(s.exposure, "exposure", ParamValue::Float(-2.0))],
+        )
+        .unwrap();
+    assert!(!renderer.has_frame(&plan(&s)));
+    let darker = renderer.render_gpu(&plan(&s), &s.media).unwrap();
+    assert_ne!(darker.texture, first.texture);
+    assert!(renderer.has_frame(&before));
+}
+
+#[test]
 fn rendering_is_bit_identical_with_a_cold_cache() {
     let s = scene();
     let a = Renderer::new(gpu(), DEFAULT_CACHE_BYTES)

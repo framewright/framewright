@@ -1651,13 +1651,12 @@ name = "fw-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
- "fw-audio",
  "fw-compile",
  "fw-core",
  "fw-doc",
+ "fw-engine",
  "fw-media",
  "fw-ops",
- "fw-playback",
  "fw-plugin",
  "fw-render",
  "fw-testmedia",

@@ -1,9 +1,11 @@
-//! The RAM cache: rendered images and decoded pictures by content key,
-//! evicting the least recently used. Hardware decoders' pictures live in GPU
-//! memory, so they count against a budget of their own.
+//! The cache: rendered images and decoded pictures by content key, evicting
+//! the least recently used. Three kinds of entry each have a budget of their
+//! own: images and pictures in RAM, hardware decoders' pictures in GPU
+//! memory, and finished frames kept in GPU memory for showing again (the
+//! frame cache).
 //!
 //! Nothing is ever invalidated explicitly. A changed input changes the key.
-//! TODO: the GPU-memory and persistent disk tiers (design §4.3).
+//! TODO: the persistent disk tier (design §4.3).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -11,12 +13,24 @@ use std::sync::Arc;
 use fw_compile::Decoded;
 use fw_core::{ContentHash, RgbaImage};
 
+use crate::GpuImage;
+
 #[derive(Debug, Clone)]
 pub enum Cached {
     /// A plan's output, premultiplied.
     Image(Arc<RgbaImage>),
     /// A file's picture as decoded (straight RGBA is premultiplied first).
     Decoded(Arc<Decoded>),
+    /// A plan's output left on the GPU for showing.
+    Frame(GpuImage),
+}
+
+/// Which budget an entry counts against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tier {
+    Ram = 0,
+    Pictures = 1,
+    Frames = 2,
 }
 
 impl Cached {
@@ -24,11 +38,16 @@ impl Cached {
         match self {
             Cached::Image(i) => i.byte_size(),
             Cached::Decoded(d) => d.byte_size(),
+            Cached::Frame(f) => f.texture.width() as usize * f.texture.height() as usize * 8,
         }
     }
 
-    fn on_gpu(&self) -> bool {
-        matches!(self, Cached::Decoded(d) if matches!(**d, Decoded::Hardware(_)))
+    fn tier(&self) -> Tier {
+        match self {
+            Cached::Decoded(d) if matches!(**d, Decoded::Hardware(_)) => Tier::Pictures,
+            Cached::Frame(_) => Tier::Frames,
+            _ => Tier::Ram,
+        }
     }
 }
 
@@ -36,11 +55,14 @@ impl Cached {
 /// 340 1080p NV12 pictures.
 pub const DEFAULT_GPU_CACHE_BYTES: usize = 1 << 30;
 
+/// A default budget for the frame cache: 2 GiB, about 130 1080p frames.
+pub const DEFAULT_FRAME_CACHE_BYTES: usize = 2 << 30;
+
 pub struct RamCache {
-    budget: usize,
-    used: usize,
-    gpu_budget: usize,
-    gpu_used: usize,
+    /// By [`Tier`].
+    budgets: [usize; 3],
+    used: [usize; 3],
+    evictions: u64,
     clock: u64,
     entries: HashMap<ContentHash, (Cached, u64)>,
     by_age: BTreeMap<u64, ContentHash>,
@@ -52,11 +74,16 @@ impl RamCache {
     }
 
     pub fn with_gpu_budget(budget_bytes: usize, gpu_budget_bytes: usize) -> RamCache {
+        RamCache::with_budgets(budget_bytes, gpu_budget_bytes, 0)
+    }
+
+    /// Budgets for RAM, hardware pictures and finished frames. A frame
+    /// budget of 0 keeps no frames.
+    pub fn with_budgets(ram: usize, gpu_pictures: usize, frames: usize) -> RamCache {
         RamCache {
-            budget: budget_bytes,
-            used: 0,
-            gpu_budget: gpu_budget_bytes,
-            gpu_used: 0,
+            budgets: [ram, gpu_pictures, frames],
+            used: [0; 3],
+            evictions: 0,
             clock: 0,
             entries: HashMap::new(),
             by_age: BTreeMap::new(),
@@ -72,33 +99,57 @@ impl RamCache {
         Some(image.clone())
     }
 
+    /// Changes the frame cache's budget, evicting frames if it shrank.
+    pub fn set_frame_budget(&mut self, bytes: usize) {
+        self.budgets[Tier::Frames as usize] = bytes;
+        while self.used[Tier::Frames as usize] > bytes {
+            let oldest = self
+                .by_age
+                .values()
+                .find(|k| self.entries[*k].0.tier() == Tier::Frames)
+                .copied();
+            match oldest {
+                Some(key) => {
+                    self.remove(&key);
+                    self.evictions += 1;
+                }
+                None => break,
+            }
+        }
+    }
+
+    /// Whether `key` is held, without counting as a use.
+    pub fn contains(&self, key: &ContentHash) -> bool {
+        self.entries.contains_key(key)
+    }
+
     /// Stores an entry unless it alone is larger than its budget, evicting
-    /// the least recently used entries of the same kind (in RAM or on the
-    /// GPU) to make room.
+    /// the least recently used entries of the same kind to make room.
     pub fn insert(&mut self, key: ContentHash, image: Cached) {
         let size = image.byte_size();
-        let on_gpu = image.on_gpu();
-        let budget = if on_gpu { self.gpu_budget } else { self.budget };
+        let tier = image.tier();
+        let budget = self.budgets[tier as usize];
         if size > budget {
             return;
         }
         self.remove(&key);
-        while self.used_by(on_gpu) + size > budget {
+        while self.used[tier as usize] + size > budget {
             let oldest = self
                 .by_age
                 .iter()
-                .find(|(_, k)| self.entries[*k].0.on_gpu() == on_gpu)
+                .find(|(_, k)| self.entries[*k].0.tier() == tier)
                 .map(|(age, k)| (*age, *k));
             let Some((age, oldest)) = oldest else {
                 break;
             };
             self.by_age.remove(&age);
             if let Some((old, _)) = self.entries.remove(&oldest) {
-                *self.used_mut(on_gpu) -= old.byte_size();
+                self.used[tier as usize] -= old.byte_size();
+                self.evictions += 1;
             }
         }
         self.clock += 1;
-        *self.used_mut(on_gpu) += size;
+        self.used[tier as usize] += size;
         self.by_age.insert(self.clock, key);
         self.entries.insert(key, (image, self.clock));
     }
@@ -106,30 +157,28 @@ impl RamCache {
     pub fn remove(&mut self, key: &ContentHash) {
         if let Some((image, age)) = self.entries.remove(key) {
             self.by_age.remove(&age);
-            *self.used_mut(image.on_gpu()) -= image.byte_size();
+            self.used[image.tier() as usize] -= image.byte_size();
         }
     }
 
-    fn used_by(&self, on_gpu: bool) -> usize {
-        if on_gpu { self.gpu_used } else { self.used }
-    }
-
-    fn used_mut(&mut self, on_gpu: bool) -> &mut usize {
-        if on_gpu {
-            &mut self.gpu_used
-        } else {
-            &mut self.used
-        }
+    /// Entries evicted to make room, ever.
+    pub fn evictions(&self) -> u64 {
+        self.evictions
     }
 
     /// Bytes held in RAM.
     pub fn used_bytes(&self) -> usize {
-        self.used
+        self.used[Tier::Ram as usize]
     }
 
     /// Bytes of hardware pictures held in GPU memory.
     pub fn gpu_used_bytes(&self) -> usize {
-        self.gpu_used
+        self.used[Tier::Pictures as usize]
+    }
+
+    /// Bytes of finished frames held in GPU memory.
+    pub fn frame_used_bytes(&self) -> usize {
+        self.used[Tier::Frames as usize]
     }
 
     pub fn len(&self) -> usize {
