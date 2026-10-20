@@ -124,6 +124,9 @@ pub struct Graph {
     /// Each connected input, mapped to the output feeding it. An input has at
     /// most one source.
     pub inputs: OrdMap<PortRef, PortRef>,
+    /// Where the node editor shows each node, in editor units. Nodes without
+    /// one are placed by the editor. Never read by the compiler.
+    pub positions: OrdMap<NodeId, [f64; 2]>,
 }
 
 impl Graph {
@@ -160,6 +163,8 @@ impl Graph {
 struct GraphRepr {
     nodes: Vec<NodeId>,
     edges: Vec<Edge>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    positions: Vec<(NodeId, [f64; 2])>,
 }
 
 impl From<Graph> for GraphRepr {
@@ -167,6 +172,7 @@ impl From<Graph> for GraphRepr {
         GraphRepr {
             nodes: g.nodes.iter().copied().collect(),
             edges: g.edges().collect(),
+            positions: g.positions.iter().map(|(id, p)| (*id, *p)).collect(),
         }
     }
 }
@@ -176,6 +182,7 @@ impl From<GraphRepr> for Graph {
         Graph {
             nodes: r.nodes.into_iter().collect(),
             inputs: r.edges.into_iter().map(|e| (e.to, e.from)).collect(),
+            positions: r.positions.into_iter().collect(),
         }
     }
 }

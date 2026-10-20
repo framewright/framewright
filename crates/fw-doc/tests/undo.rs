@@ -45,6 +45,11 @@ enum Op {
         node: usize,
         name: String,
     },
+    /// Moves a node in the node editor, or clears its position.
+    Move {
+        node: usize,
+        to: Option<(i16, i16)>,
+    },
     /// Two edits as one undo step.
     Pair(Box<Op>, Box<Op>),
     Undo,
@@ -70,6 +75,8 @@ fn single_op() -> impl Strategy<Value = Op> {
         4 => (any::<usize>(), any::<usize>()).prop_map(|(from, to)| Op::Connect { from, to }),
         1 => any::<usize>().prop_map(|node| Op::Disconnect { node }),
         1 => (any::<usize>(), "[a-z ]{0,8}").prop_map(|(node, name)| Op::Rename { node, name }),
+        2 => (any::<usize>(), proptest::option::of(any::<(i16, i16)>()))
+            .prop_map(|(node, to)| Op::Move { node, to }),
     ]
 }
 
@@ -209,6 +216,10 @@ fn commands(op: &Op, doc: &Document, ids: &mut SequentialIds) -> Vec<Command> {
         Op::Rename { node, name } => vec![Command::Rename {
             node: pick(doc, *node),
             name: name.clone(),
+        }],
+        Op::Move { node, to } => vec![Command::SetPosition {
+            node: pick(doc, *node),
+            position: to.map(|(x, y)| [f64::from(x) / 4.0, f64::from(y)]),
         }],
         Op::Pair(a, b) => {
             // The second edit is resolved against the document after the first,

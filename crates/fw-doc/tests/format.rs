@@ -91,6 +91,14 @@ fn sample(registry: Registry) -> Editor {
                     node: sink,
                     name: "Output".into(),
                 },
+                Command::SetPosition {
+                    node: source,
+                    position: Some([0.0, 40.5]),
+                },
+                Command::SetPosition {
+                    node: inner,
+                    position: Some([-120.0, 0.0]),
+                },
             ],
         )
         .unwrap();

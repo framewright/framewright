@@ -11,6 +11,7 @@ use crate::controls::Gestures;
 use crate::icons;
 use crate::inspector::{self, Inspector};
 use crate::lists;
+use crate::node_editor::{self, NodeEditor};
 use crate::style::{sans, tokens as t};
 use crate::timeline::{self, TimelineView};
 use crate::viewer::{self, Shown, ViewerState};
@@ -90,8 +91,7 @@ const VIDEO_WORKSPACES: [Workspace; 7] = [
     },
 ];
 
-/// A graph opens on Compose; until the node editor exists, its page lists
-/// the nodes instead.
+/// A graph opens on Compose, the node editor's page.
 const GRAPH_WORKSPACES: [Workspace; 2] = [
     Workspace {
         name: "Compose",
@@ -121,6 +121,7 @@ pub struct App {
     gestures: Gestures,
     inspector: Inspector,
     timeline: TimelineView,
+    node_editor: NodeEditor,
     /// The media the document uses, as of this frame.
     media: Vec<MediaSummary>,
 }
@@ -145,6 +146,7 @@ impl App {
             gestures: Gestures::default(),
             inspector: Inspector::default(),
             timeline: TimelineView::default(),
+            node_editor: NodeEditor::default(),
             media: vec![],
         }
     }
@@ -281,6 +283,26 @@ impl App {
                     time: frame(end - 1),
                 }
             }
+            AppCommand::Delete if self.kind == Kind::Graph => {
+                let nodes: Vec<NodeId> = self.node_editor.selection().iter().copied().collect();
+                self.selected = None;
+                if nodes.is_empty() {
+                    return;
+                }
+                Request::Edit {
+                    label: if nodes.len() == 1 {
+                        "Delete Node"
+                    } else {
+                        "Delete Nodes"
+                    }
+                    .into(),
+                    commands: nodes
+                        .into_iter()
+                        .map(|id| Command::RemoveNode { id })
+                        .collect(),
+                    gesture: None,
+                }
+            }
             AppCommand::Delete => {
                 let Some(node) = self.selected.take() else {
                     return;
@@ -337,38 +359,52 @@ fn describe(engine: &Engine) -> String {
 /// The page's panels as first laid out.
 fn layout(kind: Kind) -> Tree<Pane> {
     let mut tiles = Tiles::default();
-    let left = match kind {
-        Kind::Video => tiles.insert_pane(Pane::Media),
-        Kind::Graph => tiles.insert_pane(Pane::Nodes),
-    };
+    if kind == Kind::Graph {
+        return compose_layout(tiles);
+    }
+    let left = tiles.insert_pane(Pane::Media);
     let left = tiles.insert_tab_tile(vec![left]);
     let viewer = tiles.insert_pane(Pane::Viewer);
     let centre = tiles.insert_tab_tile(vec![viewer]);
     let inspector = tiles.insert_pane(Pane::Inspector);
     let right = tiles.insert_tab_tile(vec![inspector]);
     let top = tiles.insert_horizontal_tile(vec![left, centre, right]);
-    if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(l))) = tiles.get_mut(top)
-    {
-        l.shares.set_share(left, 300.0);
-        l.shares.set_share(centre, 972.0);
-        l.shares.set_share(right, 320.0);
-    }
-    let root = match kind {
-        Kind::Video => {
-            let timeline = tiles.insert_pane(Pane::Timeline);
-            let bottom = tiles.insert_tab_tile(vec![timeline]);
-            let root = tiles.insert_vertical_tile(vec![top, bottom]);
-            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(l))) =
-                tiles.get_mut(root)
-            {
-                l.shares.set_share(top, 562.0);
-                l.shares.set_share(bottom, 344.0);
-            }
-            root
-        }
-        Kind::Graph => top,
-    };
+    set_shares(
+        &mut tiles,
+        top,
+        &[(left, 300.0), (centre, 972.0), (right, 320.0)],
+    );
+    let timeline = tiles.insert_pane(Pane::Timeline);
+    let bottom = tiles.insert_tab_tile(vec![timeline]);
+    let root = tiles.insert_vertical_tile(vec![top, bottom]);
+    set_shares(&mut tiles, root, &[(top, 562.0), (bottom, 344.0)]);
     Tree::new(egui::Id::unique("studio-page"), root, tiles)
+}
+
+/// The Compose page: the viewer over the node editor, with the inspector
+/// down the right.
+fn compose_layout(mut tiles: Tiles<Pane>) -> Tree<Pane> {
+    let viewer = tiles.insert_pane(Pane::Viewer);
+    let viewer = tiles.insert_tab_tile(vec![viewer]);
+    let nodes = tiles.insert_pane(Pane::Nodes);
+    let nodes = tiles.insert_tab_tile(vec![nodes]);
+    let left = tiles.insert_vertical_tile(vec![viewer, nodes]);
+    set_shares(&mut tiles, left, &[(viewer, 400.0), (nodes, 506.0)]);
+    let inspector = tiles.insert_pane(Pane::Inspector);
+    let inspector = tiles.insert_tab_tile(vec![inspector]);
+    let root = tiles.insert_horizontal_tile(vec![left, inspector]);
+    set_shares(&mut tiles, root, &[(left, 1262.0), (inspector, 330.0)]);
+    Tree::new(egui::Id::unique("compose-page"), root, tiles)
+}
+
+fn set_shares(tiles: &mut Tiles<Pane>, container: TileId, shares: &[(TileId, f32)]) {
+    if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(l))) =
+        tiles.get_mut(container)
+    {
+        for (tile, share) in shares {
+            l.shares.set_share(*tile, *share);
+        }
+    }
 }
 
 struct Behaviour<'a> {
@@ -401,7 +437,18 @@ impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
                 viewer::viewer(ui, &state, self.commands);
             }
             Pane::Media => lists::media(ui, &self.app.media),
-            Pane::Nodes => lists::nodes(ui, self.engine, &mut self.app.selected),
+            Pane::Nodes => {
+                let root = self.engine.document().root();
+                node_editor::node_editor(
+                    ui,
+                    &mut self.app.node_editor,
+                    &mut self.app.gestures,
+                    self.engine,
+                    root,
+                    &mut self.app.selected,
+                    self.edits,
+                );
+            }
             Pane::Inspector => inspector::inspector(
                 ui,
                 &mut self.app.inspector,
@@ -523,6 +570,28 @@ impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
                 egui::RichText::new(name)
                     .font(crate::style::medium(12.0))
                     .color(t::TEXT_BRIGHT),
+            );
+        }
+        if active == Some(Pane::Nodes) {
+            ui.add_space(8.0);
+            let frame = ui.add(egui::Button::new(
+                egui::RichText::new("Frame All").font(sans(11.0)),
+            ));
+            if frame.on_hover_text("Show every node (F)").clicked() {
+                self.app
+                    .node_editor
+                    .frame_all(self.engine.document().root());
+            }
+            let doc = self.engine.document();
+            let count = doc.graph(doc.root()).map_or(0, |g| g.nodes.len());
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(match count {
+                    1 => "1 node".to_owned(),
+                    n => format!("{n} nodes"),
+                })
+                .font(sans(11.0))
+                .color(t::TEXT3),
             );
         }
         if active == Some(Pane::Timeline) {

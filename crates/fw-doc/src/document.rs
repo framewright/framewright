@@ -142,6 +142,9 @@ impl Document {
                 }
             }
             if let Some(g) = node.graph() {
+                if let Some(id) = g.positions.keys().find(|id| !g.nodes.contains(id)) {
+                    return Err(format!("{id} has a position but isn't in its graph"));
+                }
                 for edge in g.edges() {
                     for end in [&edge.from, &edge.to] {
                         if !g.nodes.contains(&end.node) {

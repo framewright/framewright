@@ -1,15 +1,13 @@
-//! The list panels: the media the document uses, and a graph's nodes.
+//! The list panels: the media the document uses.
 
-use egui::{Align2, CornerRadius, Rect, Sense, Stroke, Ui, pos2, vec2};
-use fw_core::NodeId;
-use fw_engine::{Engine, MediaSummary};
+use egui::{Align2, CornerRadius, Rect, Sense, Ui, pos2, vec2};
+use fw_engine::MediaSummary;
 
 use crate::icons;
-use crate::style::{medium, mono, sans, tokens as t};
+use crate::style::{medium, sans, tokens as t};
 use crate::viewer::timecode;
 
 const MEDIA_ROW_HEIGHT: f32 = 48.0;
-const NODE_ROW_HEIGHT: f32 = 30.0;
 
 /// TODO: thumbnails, importing, and editing copies' progress.
 pub fn media(ui: &mut Ui, media: &[MediaSummary]) {
@@ -99,62 +97,6 @@ fn describe(item: &MediaSummary, p: &fw_engine::Picture) -> String {
         parts.push(format!("{} uses", item.users));
     }
     parts.join(" · ")
-}
-
-/// A graph's nodes, to select one for the inspector until the node editor
-/// exists.
-pub fn nodes(ui: &mut Ui, engine: &Engine, selected: &mut Option<NodeId>) {
-    let doc = engine.document();
-    let Some(graph) = doc.graph(doc.root()) else {
-        return;
-    };
-    egui::ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.add_space(4.0);
-            for &id in &graph.nodes {
-                let Some(node) = doc.node(id) else {
-                    continue;
-                };
-                let (rect, response) = ui.allocate_exact_size(
-                    vec2(ui.available_width(), NODE_ROW_HEIGHT),
-                    Sense::click(),
-                );
-                if response.clicked() {
-                    *selected = Some(id);
-                }
-                let painter = ui.painter_at(rect);
-                let on = *selected == Some(id);
-                if on {
-                    painter.rect_filled(rect, CornerRadius::ZERO, t::RAISED2);
-                    painter.vline(
-                        rect.left() + 1.0,
-                        rect.y_range(),
-                        Stroke::new(2.0, t::ACCENT),
-                    );
-                } else if response.hovered() {
-                    painter.rect_filled(rect, CornerRadius::ZERO, t::RAISED);
-                }
-                painter.text(
-                    pos2(rect.left() + 14.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    node.name(),
-                    sans(12.0),
-                    if on { t::TEXT_BRIGHT } else { t::TEXT },
-                );
-                let type_name = engine
-                    .registry()
-                    .desc(node.type_id())
-                    .map_or(node.type_id(), |d| d.name.as_str());
-                painter.text(
-                    pos2(rect.right() - 12.0, rect.center().y),
-                    Align2::RIGHT_CENTER,
-                    type_name,
-                    mono(10.0),
-                    t::TEXT3,
-                );
-            }
-        });
 }
 
 fn empty(ui: &mut Ui, text: &str) {

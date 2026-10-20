@@ -26,6 +26,11 @@ pub const MINIMISE: &str = "M6 12h12";
 pub const MAXIMISE: &str = "M6 6h12v12H6z";
 pub const RESTORE: &str = "M6 9h9v9H6zM9 9V6h9v9h-3";
 pub const CLOSE: &str = "M6 6l12 12M18 6L6 18";
+pub const IMAGE: &str = "M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6";
+pub const COLOUR: &str = "M12 21a9 9 0 110-18 9 9 0 010 18zM12 3v18";
+pub const OUTPUT: &str = "M9 12h12M17 8l4 4-4 4M7 4H3v16h4";
+pub const NEST: &str = "M8 8h12v12H8zM4 16V4h12";
+pub const FILTER: &str = "M4 5h16l-6 8v6l-4-2v-4z";
 struct Cursor<'a> {
     b: &'a [u8],
     i: usize,

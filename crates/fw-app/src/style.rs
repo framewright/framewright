@@ -44,6 +44,23 @@ pub mod tokens {
     pub const MENU_BORDER: Color32 = rgb(0x3a3a41);
     pub const SAVED: Color32 = rgb(0x7fb38a);
     pub const CLOSE_HOVER: Color32 = rgb(0xc42b1c);
+    /// A highlighted row in a menu or list.
+    pub const MENU_ON: Color32 = rgb(0x2f2d29);
+    /// Something the document won't accept, such as a connection making a loop.
+    pub const REFUSED: Color32 = rgb(0xd0605a);
+    /// The node editor: node bodies, the grid, connections and ports.
+    pub const NODE: Color32 = rgb(0x26262b);
+    pub const GRID: Color32 = rgb(0x1d1d21);
+    pub const GRID_FINE: Color32 = rgb(0x151518);
+    pub const WIRE: Color32 = rgb(0x55555d);
+    pub const PORT_IMAGE: Color32 = rgb(0x8a8a92);
+    pub const PORT_MASK: Color32 = rgb(0x6f8fc4);
+    /// Node categories' colours.
+    pub const NODE_SOURCE: Color32 = rgb(0x6f8bb4);
+    pub const NODE_FILTER: Color32 = rgb(0x7d7d86);
+    pub const NODE_COLOUR: Color32 = rgb(0xb58e5c);
+    pub const NODE_CONTAINER: Color32 = rgb(0x8f83c2);
+    pub const NODE_OUTPUT: Color32 = rgb(0xb47a84);
 }
 
 const SANS: &str = "plex-sans";

@@ -7,7 +7,11 @@ mod chrome;
 mod controls;
 mod icons;
 mod inspector;
+mod library;
 mod lists;
+mod node_editor;
+#[cfg(test)]
+mod node_tests;
 mod style;
 #[cfg(test)]
 mod tests;

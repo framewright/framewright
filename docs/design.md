@@ -62,6 +62,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Inside a nested context, workspaces that don't apply are hidden. For example, Library and Export aren't shown inside a clip, because the result flows back to the parent.
 - **[Decided]** The navigation stack is **UI state**, not document state, so it never touches undo or saving. The back control always names its destination ("← Main Timeline"), because nesting can be deep.
 - **[Open]** Tracked "follow motion" strokes are a large feature. Design for them now, and build them later.
+- **[Proposed]** (step 4 plan) **Open in Compose.** A clip on the Edit page offers Open in Compose (the clip's context menu and the Clip menu). The first time, the plain clip becomes a Graph container in place, holding an Input node (the clip's media) connected to an Output node, as one undo step. The Compose page then shows that graph, with "← Main Timeline" to go back. The viewer shows the timeline at the playhead, which now includes the clip's graph. TODO: viewing one node's output.
 
 ### 3.3 Naming rules
 
@@ -89,6 +90,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** **Typed ports:** image, mask, audio (with a channel layout), scene, plus later types such as geometry or text. Connections live in the container's structure, never inside a node's opaque payload.
 - **[Decided]** **Plain clips are cheap.** A clip with no graph is stored compactly as "media → output" and only becomes a real graph when opened.
 - **[Decided]** (from step 1) Until a container type can lower itself, nested containers and optional inputs stop compilation with a clear "not yet" error that names the node, rather than rendering something wrong.
+- **[Proposed]** (step 4 plan) **A node with a graph inside.** A node type can declare that it may hold a graph (`NodeTypeDesc::can_hold_graph`; the plain clip does). `Command::MakeGraph` gives such a node an empty Graph, and `Command::RemoveGraph` takes an empty one away again. The compiler lowers the contents first, from their Output node, with the node's path and clocks. The node's own image behaviour then receives the contents' result as its one input. Inside, the Input node (`fw.input`) stands for what the container supplies, which comes from a new `ImageBehaviour::source` hook. For a clip that is its media, so the file, colour space and audio stay on the clip, and the clip's opacity and composite mode apply after its graph. Nested Graph containers with published inputs and outputs later reuse the same Input node.
 
 ### 4.1 Node interface
 
@@ -236,6 +238,12 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Proposed]** (step 3 plan) **`fw-app` layout:** one main window driven by hand (winit, egui, egui-winit, egui-wgpu). Pages come from the document kind: for timelines the Edit page is built now, and the other workspaces are listed but disabled until they exist. A graph document gets a viewer, the inspector and a plain node list until the node editor exists. IBM Plex (SIL OFL) is embedded in the binary. `fw-app` depends on wgpu, because egui-wgpu draws on the engine's device; it and `fw-render` are the only crates that do.
 - **[Proposed]** (step 3 plan) **The deterministic launch mode:** `fw-app <project> --screenshot <png>` opens the project in a fixed state (`--seek` and `--select` set the playhead and the selection), renders until the viewer's frame is ready, saves the window and exits.
 - **[Proposed]** (step 3 plan) **The viewer is the display boundary.** It draws the engine's frame with its own shader inside the UI's pass, with no copy: from the frame's colour space to linear Rec.709, over the viewer background, then encoded for the swapchain (the sRGB curve on the default 10-bit `Rgb10a2Unorm` surface). A real display and view transform replaces that last step later. Exports never pass through it.
+- **[Proposed]** (step 4 plan) **The node editor, on the Compose page.** It shows the graph of the container being edited: the root of a graph document, or a clip opened in Compose.
+  - Nodes are boxes with typed ports, inputs on the left and outputs on the right. Connections are curves. The canvas pans and zooms.
+  - Dragging from a port to a port connects them (`Command::Connect`, replacing the input's source). Dragging a connection off its input disconnects it. A drop the document would refuse (a loop, or different kinds of data) is shown as refused while dragging, with the reason.
+  - Clicking selects a node for the inspector. Delete removes it. Dragging moves the selected nodes, one undo step per drag.
+  - Nodes are added from a searchable list of the registry's types grouped by category, opened with Tab or a right-click. The new node lands where the list was opened.
+- **[Proposed]** (step 4 plan) **Node positions are saved in the document.** They live in the Graph's contents (`"positions": {"<node id>": [x, y]}`, in editor units) and change through `Command::SetPosition`, so moving nodes is undoable and travels with the file. A node with no saved position is placed by the editor (in columns by depth) until it is moved. The compiler never reads positions, so moving a node changes no cache key.
 
 ### 10.1 Process model
 
@@ -258,6 +266,16 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Audio: CLAP hosting (§8).
 - **[Decided]** "Recipe" plugins that compile parameters into ordinary graphs, so plugin code never runs per frame. This idea comes from the old prototype.
 - **[Decided]** Node dispatch goes through a registry. Adding a node type touches one place (the old prototype needed 8 to 9 files).
+- **[Proposed]** (step 4 plan) **Shader nodes.** A shader plugin is a folder holding `plugin.toml` and a WGSL file. The manifest gives the id, version, name, category, image inputs (one called `image` by default), parameters (float, int, bool, choice, vec2, colour, with ranges, units and sections) and whether the node varies with time. The WGSL is the body of a per-pixel function, the same as a built-in `PixelOp`:
+  - It sees `c` (the first input's premultiplied pixel), the other inputs by their port ids, and each parameter by its id. Colours arrive in the working space, and a choice arrives as its index.
+  - It also sees `pos`, the pixel's centre in canvas units, and `frame`, the input's region. The fused kernel needs this.
+  - It returns a `vec4<f32>`, which is fused with the operations around it like any per-pixel operation.
+  - The host checks the manifest and validates the generated function with naga against the real kernel prelude when it loads. A broken plugin still registers, so documents using it keep their nodes, but rendering it gives an error that shows the shader error.
+  - The manifest and shader text form the implementation hash, so editing a shader misses the cache with no explicit invalidation.
+  - TODO: helper functions outside the body (they need renaming so fused kernels don't clash), operations that read neighbouring pixels (blurs) with their margins, and a time seed for noise.
+- **[Proposed]** (step 4 plan) **Where plugins come from.** Plugins are read from the built-in set embedded in the binary, then `$XDG_DATA_HOME/framewright/plugins`, then each folder in `FW_PLUGIN_PATH`. A plugin that reuses an id already loaded is reported and skipped. One constructor builds this registry, so the app, `fw render` and `fw play` agree.
+- **[Proposed]** (step 4 plan) **Built-ins on the shader host.** `fw.exposure` moves onto it, with the same id, version and parameter, and new built-ins (Saturation, Invert, Vignette, Mix) are written as shader plugins. This proves the API is complete for per-pixel nodes.
+- **[Proposed]** (step 4 plan) **Reloading plugins.** `Request::ReloadPlugins` builds a fresh registry and swaps it into the editor and renderer. It then follows the same path as an edit: frames rendered ahead are dropped, and cached frames are checked again. The app watches the plugin folders and sends the request when a file changes, so a saved shader shows at once. TODO: when a reload changes a node's parameters, existing nodes keep their stored values and are checked again on the next edit; version migrations for plugins come later.
 
 ### Scripting
 
@@ -340,6 +358,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 ```
 fw-core      ids, rational time, math, colour-space descriptors, hashing (no GPU, no I/O)
 fw-plugin    the node contract: node type descriptions, parameter schemas, registry
+fw-shader    the shader-node plugin host: manifests and WGSL to node types (Proposed, step 4)
 fw-doc       document model, containers, commands, undo, serialisation, migrations
 fw-compile   authoring tree → flat evaluation graph(s): video and audio schedules
 fw-render    GPU executor, resource pool, content-hashed cache, scheduling
@@ -364,7 +383,7 @@ fw-bench     benchmark harness and performance budgets
 1. Core types, document, serialisation, and a three-node graph (image → exposure → output) rendered headlessly to EXR, colour-managed, with golden-image tests.
 2. Time: a video source and the Timeline container, compiled to the flat graph, plus audio playback with A/V sync.
 3. The UI shell in the Studio style (after the toolkit bake-off): viewer, parameter editing, undo, frame cache.
-4. Shader-node plugins, to prove early that built-ins use the plugin API.
+4. Shader-node plugins, to prove early that built-ins use the plugin API. In progress, paired with the node editor and Open in Compose (step 4 plan, Proposed).
 5. Then widen: LayerStack and Photo documents, masks, text, mixer, 3D.
 
 **[Decided]** (from the hardware decoding discussion) Before step 3: editing copies and hardware decoding, so scrubbing feels right from the first UI build.
@@ -384,4 +403,4 @@ The old code is at `~/projects/video-editor`, with a GPUI fork at `~/projects/fr
 ## 16. Open questions
 
 - How paint and retouch strokes are stored and evaluated inside video clips (every frame vs follow motion).
-- Plugin interface details: manifest schema, versioning, sandboxing limits.
+- Plugin interface details: versioning and sandboxing limits. Shader nodes' manifests are proposed in §11; WASM manifests remain open.

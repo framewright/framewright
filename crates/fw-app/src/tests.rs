@@ -30,18 +30,24 @@ fn project() -> Project {
     let path = dir.path().join("project.json");
     let video = fw_testmedia::count_24fps();
     let clip = write_project(&path, &video);
-    let gpu = Arc::new(Gpu::new().unwrap());
     let settings = Settings {
         editing_copies: false,
         sound: false,
         ..Settings::default()
     };
-    let engine = Engine::open(&path, gpu, settings).unwrap();
+    let engine = Engine::open(&path, gpu(), settings).unwrap();
     Project {
         _dir: dir,
         clip,
         engine,
     }
+}
+
+/// One device for every test, as the app has: many devices at once can hang
+/// or crash the driver.
+pub(crate) fn gpu() -> Arc<Gpu> {
+    static GPU: std::sync::OnceLock<Arc<Gpu>> = std::sync::OnceLock::new();
+    GPU.get_or_init(|| Arc::new(Gpu::new().unwrap())).clone()
 }
 
 fn write_project(path: &Path, video: &Path) -> NodeId {
@@ -99,7 +105,7 @@ fn write_project(path: &Path, video: &Path) -> NodeId {
     clip
 }
 
-fn harness(engine: Engine) -> Harness<'static, (App, Engine)> {
+pub(crate) fn harness(engine: Engine) -> Harness<'static, (App, Engine)> {
     let app = App::new(&engine);
     Harness::builder()
         .with_size(Vec2::new(1600.0, 1000.0))
@@ -111,7 +117,7 @@ fn harness(engine: Engine) -> Harness<'static, (App, Engine)> {
 }
 
 /// Presses at `from`, moves to `to` in steps, and lets go.
-fn drag(harness: &mut Harness<'_, (App, Engine)>, from: Pos2, to: Pos2) {
+pub(crate) fn drag(harness: &mut Harness<'_, (App, Engine)>, from: Pos2, to: Pos2) {
     harness.hover_at(from);
     harness.step();
     harness.drag_at(from);

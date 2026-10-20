@@ -13,7 +13,7 @@
 //!       "type": "fw.graph",
 //!       "version": 1,
 //!       "name": "Main",
-//!       "graph": { "nodes": { "<id>": { ... } }, "edges": [ ... ] }
+//!       "graph": { "nodes": { "<id>": { ... } }, "edges": [ ... ], "positions": { "<id>": [x, y] } }
 //!     }
 //!   }
 //! }
@@ -131,6 +131,8 @@ struct KnownOut<'a> {
 struct GraphOut<'a> {
     nodes: BTreeMap<NodeId, NodeOut<'a>>,
     edges: Vec<Edge>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    positions: BTreeMap<NodeId, [f64; 2]>,
 }
 
 #[derive(Serialize)]
@@ -161,6 +163,7 @@ fn node_out(doc: &Document, id: NodeId) -> NodeOut<'_> {
             graph: n.graph_contents().map(|g| GraphOut {
                 nodes: g.nodes.iter().map(|c| (*c, node_out(doc, *c))).collect(),
                 edges: g.edges().collect(),
+                positions: g.positions.iter().map(|(id, p)| (*id, *p)).collect(),
             }),
             timeline: n.timeline_contents().map(|t| TimelineOut {
                 width: t.settings.width,
@@ -252,6 +255,8 @@ struct GraphIn {
     nodes: BTreeMap<NodeId, Box<RawValue>>,
     #[serde(default)]
     edges: Vec<Edge>,
+    #[serde(default)]
+    positions: BTreeMap<NodeId, [f64; 2]>,
 }
 
 fn read_node(
@@ -327,6 +332,17 @@ fn read_node(
             if g.inputs.insert(edge.to.clone(), edge.from).is_some() {
                 return Err(err(format!("input {} is connected twice", edge.to)));
             }
+        }
+        for (child, position) in graph.positions {
+            if !g.nodes.contains(&child) {
+                return Err(err(format!(
+                    "{child} has a position but isn't in the graph"
+                )));
+            }
+            if !position.iter().all(|v| v.is_finite()) {
+                return Err(err(format!("{child}'s position isn't finite")));
+            }
+            g.positions.insert(child, position);
         }
         contents = Some(Contents::Graph(g));
     }

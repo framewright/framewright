@@ -282,12 +282,16 @@ fn the_frame_cache_keeps_frames_an_edit_and_its_undo_leave_alone() {
     let path = dir.path().join("project.json");
     let clip = write_project(&path, &fw_testmedia::count_24fps());
     let mut engine = open(&path);
-    engine.request(Request::Play).unwrap();
-    assert!(until(&mut engine, 10, |e| !e.is_playing()));
+    // Every frame, by seeking: playing under load may drop some.
+    for frame in 0..48 {
+        let time = Time::of_frame(frame, Time::from_seconds(24)).unwrap();
+        engine.request(Request::Seek { time }).unwrap();
+        assert!(engine.wait_for_frame(Duration::from_secs(20)));
+    }
     let cached = |e: &Engine| e.cached_frames().iter().map(|(a, b)| b - a).sum::<i64>();
     assert!(
         until(&mut engine, 10, |e| cached(e) >= 40),
-        "played frames are cached: {:?}",
+        "shown frames are cached: {:?}",
         engine.cached_frames()
     );
 

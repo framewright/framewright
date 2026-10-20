@@ -41,6 +41,9 @@ pub enum Command {
         edges: Vec<Edge>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         placement: Option<Placement>,
+        /// The top node's position in the node editor, when its parent is a graph.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<[f64; 2]>,
     },
     /// Sets a parameter, or resets it to the default with `None`.
     SetParam {
@@ -63,6 +66,12 @@ pub enum Command {
     SetPlacement {
         node: NodeId,
         placement: Placement,
+    },
+    /// Moves a node in the node editor, or leaves its placing to the editor
+    /// with `None`. The node must be in a graph.
+    SetPosition {
+        node: NodeId,
+        position: Option<[f64; 2]>,
     },
     /// Inserts a track at `index` (0 is the bottom).
     AddTrack {
@@ -118,6 +127,8 @@ pub enum CommandError {
     Placement(String),
     #[error("track: {0}")]
     Track(String),
+    #[error("node position: {0}")]
+    Position(String),
 }
 
 impl Command {
@@ -140,7 +151,7 @@ impl Command {
             Command::SetParam { node, .. } | Command::Rename { node, .. } => vec![*node],
             Command::Connect { edge } => vec![edge.from.node, edge.to.node],
             Command::Disconnect { input } => vec![input.node],
-            Command::SetPlacement { node, .. } => vec![*node],
+            Command::SetPlacement { node, .. } | Command::SetPosition { node, .. } => vec![*node],
             Command::AddTrack { timeline, .. } | Command::RemoveTrack { timeline, .. } => {
                 vec![*timeline]
             }
@@ -169,7 +180,7 @@ impl Command {
                     params: OrdMap::new(),
                     contents: desc.container.map(empty_contents),
                 });
-                place(doc, *parent, *id, placement.clone(), &[])?;
+                place(doc, *parent, *id, placement.clone(), None, &[])?;
                 doc.nodes.insert(*id, node);
                 Ok(Command::RemoveNode { id: *id })
             }
@@ -184,7 +195,7 @@ impl Command {
                     .into_iter()
                     .map(|n| (n, doc.nodes[&n].clone()))
                     .collect();
-                let (edges, placement) = unplace(doc, parent, *id)?;
+                let (edges, placement, position) = unplace(doc, parent, *id)?;
                 for (n, _) in &nodes {
                     doc.nodes.remove(n);
                     doc.parents.remove(n);
@@ -194,6 +205,7 @@ impl Command {
                     nodes,
                     edges,
                     placement,
+                    position,
                 })
             }
 
@@ -202,6 +214,7 @@ impl Command {
                 nodes,
                 edges,
                 placement,
+                position,
             } => {
                 let top = nodes
                     .first()
@@ -219,7 +232,7 @@ impl Command {
                         doc.parents.insert(child, *id);
                     }
                 }
-                place(doc, *parent, top, placement.clone(), edges)?;
+                place(doc, *parent, top, placement.clone(), *position, edges)?;
                 let mut listed: Vec<NodeId> = nodes.iter().map(|(id, _)| *id).collect();
                 let mut reached = doc.subtree(top);
                 listed.sort();
@@ -331,6 +344,22 @@ impl Command {
                 })
             }
 
+            Command::SetPosition { node, position } => {
+                if position.is_some_and(|p| !p.iter().all(|v| v.is_finite())) {
+                    return Err(CommandError::Position("it isn't finite".into()));
+                }
+                let parent = doc.parent(*node).ok_or(CommandError::Root)?;
+                let g = graph_mut(doc, parent)?;
+                let old = match position {
+                    Some(p) => g.positions.insert(*node, *p),
+                    None => g.positions.remove(node),
+                };
+                Ok(Command::SetPosition {
+                    node: *node,
+                    position: old,
+                })
+            }
+
             Command::AddTrack {
                 timeline,
                 track,
@@ -390,13 +419,14 @@ fn empty_contents(kind: ContainerKind) -> Contents {
     }
 }
 
-/// Puts `id` into `parent`'s structure: as a graph member with `edges`, or as
-/// a clip with `placement`.
+/// Puts `id` into `parent`'s structure: as a graph member with `edges` and
+/// maybe a `position`, or as a clip with `placement`.
 fn place(
     doc: &mut Document,
     parent: NodeId,
     id: NodeId,
     placement: Option<Placement>,
+    position: Option<[f64; 2]>,
     edges: &[Edge],
 ) -> Result<(), CommandError> {
     match doc.nodes.get_mut(&parent) {
@@ -410,6 +440,9 @@ fn place(
                 ));
             }
             g.nodes.insert(id);
+            if let Some(p) = position {
+                g.positions.insert(id, p);
+            }
             for edge in edges {
                 if !g.nodes.contains(&edge.from.node) || !g.nodes.contains(&edge.to.node) {
                     return Err(CommandError::InvalidRestore(format!(
@@ -432,9 +465,9 @@ fn place(
             let placement = placement.ok_or_else(|| {
                 CommandError::Placement("a clip on a timeline needs a placement".into())
             })?;
-            if !edges.is_empty() {
+            if !edges.is_empty() || position.is_some() {
                 return Err(CommandError::InvalidRestore(
-                    "timeline clips have no connections".into(),
+                    "timeline clips have no connections or node positions".into(),
                 ));
             }
             t.check_placement(&placement, None)
@@ -448,12 +481,12 @@ fn place(
     Ok(())
 }
 
+/// What restoring a node into its parent's structure needs: its connections,
+/// its placement on a timeline, or its position in a graph.
+type Place = (Vec<Edge>, Option<Placement>, Option<[f64; 2]>);
+
 /// Takes `id` out of `parent`'s structure, returning what restoring it needs.
-fn unplace(
-    doc: &mut Document,
-    parent: NodeId,
-    id: NodeId,
-) -> Result<(Vec<Edge>, Option<Placement>), CommandError> {
+fn unplace(doc: &mut Document, parent: NodeId, id: NodeId) -> Result<Place, CommandError> {
     match doc.nodes.get_mut(&parent) {
         Some(Node::Known(KnownNode {
             contents: Some(Contents::Graph(g)),
@@ -467,12 +500,12 @@ fn unplace(
                 g.inputs.remove(&edge.to);
             }
             g.nodes.remove(&id);
-            Ok((edges, None))
+            Ok((edges, None, g.positions.remove(&id)))
         }
         Some(Node::Known(KnownNode {
             contents: Some(Contents::Timeline(t)),
             ..
-        })) => Ok((vec![], t.clips.remove(&id))),
+        })) => Ok((vec![], t.clips.remove(&id), None)),
         _ => Err(CommandError::NotAContainer(parent)),
     }
 }
