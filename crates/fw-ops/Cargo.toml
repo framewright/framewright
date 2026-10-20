@@ -8,3 +8,4 @@ publish.workspace = true
 [dependencies]
 fw-core.workspace = true
 fw-plugin.workspace = true
+fw-shader.workspace = true

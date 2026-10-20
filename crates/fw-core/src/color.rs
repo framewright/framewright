@@ -76,6 +76,13 @@ impl ColorSpace {
             } => format!("{primaries:?} / {transfer:?}"),
         }
     }
+
+    /// An unpremultiplied colour given in this space, in `to`.
+    pub fn convert(self, rgb: [f64; 3], to: ColorSpace) -> [f64; 3] {
+        let linear = rgb.map(|v| self.transfer.decode(v));
+        let moved = mul_vec(&conversion_matrix(self.primaries, to.primaries), linear);
+        moved.map(|v| to.transfer.encode(v))
+    }
 }
 
 impl fmt::Display for ColorSpace {

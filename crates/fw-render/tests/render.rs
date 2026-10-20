@@ -1128,3 +1128,67 @@ fn operations_see_each_pixels_centre_in_canvas_units() {
         assert_eq!(left, 0.0, "the frame starts at the canvas origin");
     }
 }
+
+#[test]
+fn invert_flips_each_channel_in_linear_light() {
+    let mut s = scene();
+    let renderer = |s: &Scene| {
+        Renderer::new(gpu(), DEFAULT_CACHE_BYTES)
+            .render(&plan(s), &s.media)
+            .unwrap()
+    };
+    s.editor
+        .apply(
+            "No change",
+            vec![set(s.exposure, "exposure", ParamValue::Float(0.0))],
+        )
+        .unwrap();
+    let plain = renderer(&s);
+    let invert = SequentialIds::new(50).next_id();
+    let root = s.editor.doc().root();
+    let connect = |from, to| Command::Connect {
+        edge: Edge {
+            from: PortRef::new(from, "image"),
+            to: PortRef::new(to, "image"),
+        },
+    };
+    s.editor
+        .apply(
+            "Invert",
+            vec![
+                Command::AddNode {
+                    parent: root,
+                    id: invert,
+                    type_id: "fw.invert".into(),
+                    name: None,
+                    placement: None,
+                },
+                connect(s.exposure, invert),
+                connect(invert, s.output),
+            ],
+        )
+        .unwrap();
+    let inverted = renderer(&s);
+    // In the working space each premultiplied channel becomes alpha minus
+    // itself; the output space sees white carried across by its matrix.
+    let white = mul_vec(
+        &conversion_matrix(
+            ColorSpace::ACESCG.primaries,
+            ColorSpace::LINEAR_REC709.primaries,
+        ),
+        [1.0; 3],
+    );
+    let mut want = RgbaImage::new(W, H, true);
+    for y in 0..H {
+        for x in 0..W {
+            let [r, g, b, a] = plain.pixel(x, y);
+            let flip = |v: f32, w: f64| (f64::from(a) * w) as f32 - v;
+            want.set_pixel(
+                x,
+                y,
+                [flip(r, white[0]), flip(g, white[1]), flip(b, white[2]), a],
+            );
+        }
+    }
+    assert_close(&inverted, &want, "invert");
+}

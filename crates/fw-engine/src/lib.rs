@@ -29,6 +29,7 @@ use fw_plugin::{Quality, Registry};
 use fw_render::{DEFAULT_CACHE_BYTES, DEFAULT_FRAME_CACHE_BYTES, Gpu, GpuImage, Renderer};
 use serde::{Deserialize, Serialize};
 
+pub use fw_ops::{PluginProblem, plugin_folders};
 pub use media::{MediaSummary, Picture};
 
 use crate::frames::{Edited, Latest, SharedLatest};
@@ -95,7 +96,7 @@ pub enum EngineError {
 }
 
 /// How an engine reads media and plays.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Settings {
     /// Make editing copies of videos in the background, and scrub from them.
     pub editing_copies: bool,
@@ -106,6 +107,10 @@ pub struct Settings {
     pub sound: bool,
     /// GPU memory for keeping finished frames, so showing them again is free.
     pub frame_cache_bytes: usize,
+    /// Where shader plugins are read from, after the built-in nodes; see
+    /// [`fw_ops::plugin_folders`]. None by default, so tests see only the
+    /// built-ins.
+    pub plugin_folders: Vec<PathBuf>,
 }
 
 impl Default for Settings {
@@ -115,6 +120,7 @@ impl Default for Settings {
             hardware: Some(HardwarePolicy::Fastest),
             sound: true,
             frame_cache_bytes: DEFAULT_FRAME_CACHE_BYTES,
+            plugin_folders: vec![],
         }
     }
 }
@@ -180,10 +186,11 @@ pub struct Engine {
 impl Engine {
     /// Opens the project file at `path`, rendering on `gpu`.
     pub fn open(path: &Path, gpu: Arc<Gpu>, settings: Settings) -> Result<Engine, EngineError> {
-        let registry = Arc::new(fw_ops::builtin_registry());
+        let (registry, problems) = fw_ops::registry(&settings.plugin_folders);
+        let registry = Arc::new(registry);
         let doc = fw_doc::save::load(path, &registry)?;
         let folder = path.parent().unwrap_or(Path::new("."));
-        let mut warnings = vec![];
+        let mut warnings: Vec<String> = problems.iter().map(ToString::to_string).collect();
         let mut media = if settings.editing_copies {
             ProjectMedia::with_copies(
                 folder,

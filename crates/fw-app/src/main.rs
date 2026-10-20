@@ -207,6 +207,7 @@ impl Shell {
         let gpu = Gpu::for_surface(instance, Some(&surface)).map_err(|e| e.to_string())?;
         let settings = Settings {
             editing_copies: !self.args.no_copies,
+            plugin_folders: fw_engine::plugin_folders(),
             ..Settings::default()
         };
         let mut engine =

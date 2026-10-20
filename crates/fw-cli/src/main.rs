@@ -124,9 +124,18 @@ fn output_format(out: &Path) -> Result<Format, String> {
     }
 }
 
+/// The built-in nodes and the user's shader plugins, reporting broken plugins.
+fn registry() -> fw_plugin::Registry {
+    let (registry, problems) = fw_ops::registry(&fw_ops::plugin_folders());
+    for problem in problems {
+        eprintln!("fw: plugin {problem}");
+    }
+    registry
+}
+
 /// Loads a project and compiles it. Returns the plan and the media access for rendering.
 fn compile(project: &Path, time: Time, out: Option<&Path>) -> Result<(Plan, ProjectMedia), String> {
-    let registry = fw_ops::builtin_registry();
+    let registry = registry();
     let doc = fw_doc::save::load(project, &registry).map_err(|e| e.to_string())?;
     let folder = project.parent().unwrap_or(Path::new("."));
     let media = ProjectMedia::new(folder);
@@ -220,7 +229,7 @@ fn project_media(folder: &Path, copies: bool) -> ProjectMedia {
 
 fn copies(project: &Path) -> Result<(), String> {
     use fw_compile::MediaResolver;
-    let registry = fw_ops::builtin_registry();
+    let registry = registry();
     let doc = fw_doc::save::load(project, &registry).map_err(|e| e.to_string())?;
     let folder = project.parent().unwrap_or(Path::new("."));
     let media = project_media(folder, true);
@@ -279,6 +288,7 @@ fn play(
         editing_copies: !no_copies,
         hardware: Some(hardware_policy()),
         sound: !no_audio,
+        plugin_folders: fw_ops::plugin_folders(),
         ..Settings::default()
     };
     let mut engine = Engine::open(project, gpu, settings).map_err(|e| e.to_string())?;

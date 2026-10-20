@@ -20,6 +20,7 @@ fw-playback = { path = "crates/fw-playback" }
 fw-engine = { path = "crates/fw-engine" }
 fw-testmedia = { path = "crates/fw-testmedia" }
 fw-render = { path = "crates/fw-render" }
+fw-shader = { path = "crates/fw-shader" }
 
 blake3 = "1"
 imbl = { version = "6", features = ["serde"] }
@@ -30,8 +31,10 @@ serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 tempfile = "3"
 thiserror = "2"
 ulid = { version = "1", features = ["serde"] }
-# naga is only for validating generated shaders in tests; keep it on the same major as wgpu.
+# naga validates generated shaders: shader plugins as they load, and kernels in tests. Keep it on
+# the same major as wgpu.
 naga = { version = "30", features = ["wgsl-in"] }
+toml = "1"
 # Development builds link the system FFmpeg (design §12); the private build replaces this later.
 rsmpeg = { version = "0.18", default-features = false, features = ["ffmpeg8", "link_system_ffmpeg"] }
 # Only fw-render and fw-app may depend on wgpu; it follows egui-wgpu's major version.

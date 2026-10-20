@@ -1,0 +1,21 @@
+id = "fw.mix"
+version = 1
+name = "Mix"
+category = "Composite"
+
+[[inputs]]
+id = "image"
+name = "A"
+
+[[inputs]]
+id = "b"
+name = "B"
+
+[[params]]
+id = "amount"
+name = "Amount"
+type = "float"
+unit = "percent"
+default = 50
+range = [0, 100]
+limits = [0, 100]

@@ -273,7 +273,58 @@ fn param_row(
                 .or(changed
                     .map(|gesture| ParamChange::Value(ParamValue::Text(text), Some(gesture))))
         }
-        // TODO: relinking media, and editing vectors and colours.
+        (ParamKind::Vec2 { .. }, ParamValue::Vec2(v)) => {
+            let mut v = v;
+            let mut changed = None;
+            let reset = controls::custom_row(ui, id, &label, |ui| {
+                let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                for (axis, value) in ["x", "y"].into_iter().zip(&mut v) {
+                    let field = egui::DragValue::new(value)
+                        .speed(0.01)
+                        .prefix(format!("{axis} "));
+                    let response = ui.add_enabled_ui(!animated, |ui| {
+                        ui.add_sized([width, ui.available_height()], field)
+                    });
+                    let response = response.inner;
+                    if response.changed() {
+                        // One drag of a field is one undo step.
+                        changed = Some(gestures.drag(response.id));
+                    } else if !response.dragged() && !response.has_focus() {
+                        gestures.end(response.id);
+                    }
+                }
+            });
+            reset
+                .map(ParamChange::from)
+                .or(changed.map(|gesture| ParamChange::Value(ParamValue::Vec2(v), Some(gesture))))
+        }
+        // TODO: a picker in the Studio style that keeps values above 1.0 and
+        // shows which colour space they're in.
+        (ParamKind::Color, ParamValue::Color(color)) => {
+            let mut rgba = color.rgba.map(|v| v as f32);
+            let mut changed = None;
+            let reset = controls::custom_row(ui, id, &label, |ui| {
+                let response = ui
+                    .add_enabled_ui(!animated, |ui| {
+                        ui.color_edit_button_rgba_unmultiplied(&mut rgba)
+                    })
+                    .inner;
+                let widget = response.id;
+                if response.changed() {
+                    changed = Some(gestures.drag(widget));
+                } else if !ui.input(|i| i.pointer.any_down()) {
+                    gestures.end(widget);
+                }
+            });
+            reset.map(ParamChange::from).or(changed.map(|gesture| {
+                let color = fw_plugin::Color {
+                    rgba: rgba.map(f64::from),
+                    ..color
+                };
+                ParamChange::Value(ParamValue::Color(color), Some(gesture))
+            }))
+        }
+        // TODO: relinking media.
         (ParamKind::Media, ParamValue::Media(media)) => {
             let name = std::path::Path::new(&media.path)
                 .file_name()

@@ -1,0 +1,38 @@
+id = "fw.vignette"
+version = 1
+name = "Vignette"
+category = "Filter"
+
+[[params]]
+id = "amount"
+name = "Amount"
+type = "float"
+unit = "percent"
+default = 50
+range = [0, 100]
+limits = [0, 100]
+
+[[params]]
+id = "size"
+name = "Size"
+type = "float"
+unit = "percent"
+default = 80
+range = [0, 150]
+limits = [0, 1000]
+
+[[params]]
+id = "softness"
+name = "Softness"
+type = "float"
+unit = "percent"
+default = 60
+range = [0, 100]
+limits = [0, 100]
+
+[[params]]
+id = "centre"
+name = "Centre"
+type = "vec2"
+default = [0.5, 0.5]
+section = "Position"

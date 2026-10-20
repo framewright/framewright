@@ -1,0 +1,12 @@
+id = "fw.exposure"
+version = 1
+name = "Exposure"
+category = "Colour"
+
+[[params]]
+id = "exposure"
+name = "Exposure"
+type = "float"
+unit = "stops"
+range = [-5, 5]
+limits = [-64, 64]

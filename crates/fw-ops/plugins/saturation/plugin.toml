@@ -1,0 +1,13 @@
+id = "fw.saturation"
+version = 1
+name = "Saturation"
+category = "Colour"
+
+[[params]]
+id = "saturation"
+name = "Saturation"
+type = "float"
+unit = "percent"
+default = 100
+range = [0, 200]
+limits = [0, 1000]
