@@ -104,9 +104,7 @@ const KEYWORDS: &[&str] = &[
 /// Checks `name` can be used as a WGSL name inside a shader body.
 fn check_name(what: &str, name: &str) -> Result<(), String> {
     let mut chars = name.chars();
-    let starts_well = chars
-        .next()
-        .is_some_and(|c| c.is_ascii_lowercase() || c == '_');
+    let starts_well = chars.next().is_some_and(|c| c.is_ascii_lowercase());
     if !starts_well || !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
         return Err(format!(
             "{what} id {name:?} must be lower case letters, digits and _, starting with a letter"
@@ -119,8 +117,7 @@ fn check_name(what: &str, name: &str) -> Result<(), String> {
     let kernel_name = TAKEN.contains(&name)
         || ["e", "ex"].into_iter().any(numbered)
         || name.starts_with("fw_")
-        || name.starts_with("op_")
-        || name.starts_with("__");
+        || name.starts_with("op_");
     if kernel_name {
         return Err(format!(
             "{what} id {name:?} is a name the kernel around the shader uses"
@@ -400,7 +397,7 @@ default = [1, 0.5, 0.25]
     #[test]
     fn names_the_kernel_uses_are_refused() {
         for name in [
-            "c", "pos", "e0", "ex12", "fw_mat3", "op_1", "let", "Amount", "2x",
+            "c", "pos", "e0", "ex12", "fw_mat3", "op_1", "let", "Amount", "2x", "_hidden",
         ] {
             let text =
                 format!("{HEAD}[[params]]\nid = \"{name}\"\nname = \"N\"\ntype = \"float\"\n");

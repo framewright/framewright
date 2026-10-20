@@ -6,6 +6,7 @@ description: How a shader node turns a manifest and a WGSL function body
   finds plugins, how it reloads them, and how it reports their errors.
 related:
   - framewright/writing-a-shader-node
+  - framewright/shader-node-manifest
 ---
 
 A shader node is a node you write yourself as a short GPU program, without
@@ -38,7 +39,8 @@ Framewright never shows a frame made with an older version of the shader.
 ## What the function sees
 
 The shader file holds the inside of a function. Before its first line,
-Framewright declares these names:
+Framewright declares names for the pixel, the inputs, and the parameters
+that the [manifest](~framewright/shader-node-manifest) lists:
 
 | Name | WGSL type | Holds |
 |---|---|---|

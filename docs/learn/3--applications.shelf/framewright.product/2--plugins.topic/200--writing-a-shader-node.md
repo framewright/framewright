@@ -6,6 +6,7 @@ description: Write a Tint node as a shader plugin, from an empty folder to a
   and read the error Framewright reports for a broken one.
 related:
   - framewright/shader-nodes
+  - framewright/shader-node-manifest
 ---
 
 This page builds a Tint node as a shader plugin: a node that multiplies the
@@ -57,7 +58,8 @@ Knowing some WGSL helps, but this page doesn't depend on it.
 
    The manifest names the node, puts it in the library's **Filter** group,
    and gives it two parameters. `range` sets what the slider covers, and
-   `limits` sets the values Framewright accepts. Every node type needs its
+   `limits` sets the values Framewright accepts. The
+   [manifest reference](~framewright/shader-node-manifest) lists every key. Every node type needs its
    own `id`, so start yours with a prefix of your own and a dot; the
    built-in nodes use `fw.`.
 
