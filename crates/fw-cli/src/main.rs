@@ -69,7 +69,14 @@ enum Cmd {
         /// Don't open an audio device; the wall clock sets the pace.
         #[arg(long)]
         no_audio: bool,
+        /// Read originals only: don't make or use editing copies.
+        #[arg(long)]
+        no_copies: bool,
     },
+    /// Make the project's editing copies (intra-frame versions of its videos,
+    /// for quick scrubbing) now, reporting progress, instead of in the
+    /// background while playing.
+    Copies { project: PathBuf },
     /// Write an example project (a gradient through Exposure) into a folder.
     Example { folder: PathBuf },
 }
@@ -93,7 +100,9 @@ fn main() -> ExitCode {
             from,
             seconds,
             no_audio,
-        } => play(&project, from, seconds, no_audio),
+            no_copies,
+        } => play(&project, from, seconds, no_audio, no_copies),
+        Cmd::Copies { project } => copies(&project),
         Cmd::Example { folder } => example(&folder),
     };
     match result {
@@ -177,7 +186,73 @@ fn render(project: &Path, time: Time, out: &Path, sixteen_bit: bool) -> Result<(
     Ok(())
 }
 
-fn play(project: &Path, from: Time, seconds: f64, no_audio: bool) -> Result<(), String> {
+/// Media access for a project, making and using editing copies when `copies`.
+fn project_media(folder: &Path, copies: bool) -> ProjectMedia {
+    if copies {
+        ProjectMedia::with_copies(
+            folder,
+            ProjectMedia::copy_root(folder),
+            fw_media::PRORES_PROXY_1080,
+        )
+    } else {
+        ProjectMedia::new(folder)
+    }
+}
+
+fn copies(project: &Path) -> Result<(), String> {
+    use fw_compile::MediaResolver;
+    let registry = fw_ops::builtin_registry();
+    let doc = fw_doc::save::load(project, &registry).map_err(|e| e.to_string())?;
+    let folder = project.parent().unwrap_or(Path::new("."));
+    let media = project_media(folder, true);
+    let copies = media.copies().expect("copies are on");
+    let started = Instant::now();
+    let mut videos = vec![];
+    for (_, node) in doc.nodes() {
+        let Some(known) = node.as_known() else {
+            continue;
+        };
+        for param in known.params.values() {
+            if let Param::Constant(ParamValue::Media(reference)) = param {
+                let info = media.probe(reference)?;
+                if info.frames.is_some() && !videos.iter().any(|(_, f)| *f == info.fingerprint) {
+                    videos.push((reference.path.clone(), info.fingerprint));
+                }
+            }
+        }
+    }
+    let report = || {
+        let mut done = true;
+        for (path, fingerprint) in &videos {
+            match copies.progress(fingerprint) {
+                Some((ready, all)) => {
+                    done &= ready == all;
+                    println!("  {path}: {ready} of {all} chunks");
+                }
+                None => println!("  {path}: needs no copy"),
+            }
+        }
+        done
+    };
+    println!(
+        "editing copies in {}",
+        ProjectMedia::copy_root(folder).display()
+    );
+    while !report() {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+    copies.wait();
+    println!("done in {:.1} s", started.elapsed().as_secs_f64());
+    Ok(())
+}
+
+fn play(
+    project: &Path,
+    from: Time,
+    seconds: f64,
+    no_audio: bool,
+    no_copies: bool,
+) -> Result<(), String> {
     use fw_audio::{AudioEngine, MasterClock, WallClock};
     use fw_playback::{DocumentFrames, Player};
 
@@ -227,7 +302,7 @@ fn play(project: &Path, from: Time, seconds: f64, no_audio: bool) -> Result<(), 
     let frames = DocumentFrames {
         doc,
         registry,
-        media: ProjectMedia::new(folder),
+        media: project_media(folder, !no_copies),
         renderer: Renderer::new(gpu, DEFAULT_CACHE_BYTES),
         rate,
         options,

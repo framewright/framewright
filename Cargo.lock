@@ -821,6 +821,7 @@ dependencies = [
  "fw-plugin",
  "fw-testmedia",
  "image",
+ "libc",
  "rsmpeg",
  "tempfile",
  "thiserror 2.0.21",

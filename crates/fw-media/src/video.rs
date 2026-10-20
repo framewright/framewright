@@ -47,7 +47,7 @@ impl VideoInfo {
     }
 }
 
-fn decode_error(path: &Path) -> impl Fn(String) -> MediaError + use<> {
+pub(crate) fn decode_error(path: &Path) -> impl Fn(String) -> MediaError + use<> {
     let path = path.to_owned();
     move |message| MediaError::Decode {
         path: path.clone(),
@@ -55,7 +55,7 @@ fn decode_error(path: &Path) -> impl Fn(String) -> MediaError + use<> {
     }
 }
 
-fn open_input(path: &Path) -> Result<(AVFormatContextInput, usize), MediaError> {
+pub(crate) fn open_input(path: &Path) -> Result<(AVFormatContextInput, usize), MediaError> {
     let err = decode_error(path);
     let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
         .map_err(|_| err("path contains a NUL byte".into()))?;
@@ -65,6 +65,36 @@ fn open_input(path: &Path) -> Result<(AVFormatContextInput, usize), MediaError> 
         .map_err(|e| err(e.to_string()))?
         .ok_or_else(|| err("no video stream".into()))?;
     Ok((input, stream))
+}
+
+/// A decoder for the stream `par` describes, using `threads` threads, or as
+/// many as there are cores. Threads split frames and slices; for `intra`
+/// streams (every frame decodes alone) only slices, because each frame
+/// thread delays the first frame after a seek: about 10 ms against under 1
+/// for a ProRes Proxy frame.
+pub(crate) fn open_decoder(
+    path: &Path,
+    par: &rsmpeg::avcodec::AVCodecParameters,
+    threads: Option<usize>,
+    intra: bool,
+) -> Result<AVCodecContext, MediaError> {
+    let err = decode_error(path);
+    let codec = rsmpeg::avcodec::AVCodec::find_decoder(par.codec_id)
+        .ok_or_else(|| err("no decoder for this codec".into()))?;
+    let mut decoder = AVCodecContext::new(&codec);
+    decoder
+        .apply_codecpar(par)
+        .map_err(|e| err(e.to_string()))?;
+    let count = threads.map_or("auto".to_owned(), |n| n.to_string());
+    let count = std::ffi::CString::new(count).expect("no NUL in a number");
+    let mut options = rsmpeg::avutil::AVDictionary::new(c"threads", &count, 0);
+    if intra {
+        options = options.set(c"thread_type", c"slice", 0);
+    }
+    decoder
+        .open(Some(options))
+        .map_err(|e| err(e.to_string()))?;
+    Ok(decoder)
 }
 
 /// Reads the container's packets (without decoding) to learn every frame's
@@ -222,6 +252,16 @@ impl VideoReader {
 
     /// Opens a file already probed, without reading it again.
     pub fn open_probed(path: &Path, info: &VideoInfo) -> Result<VideoReader, MediaError> {
+        VideoReader::open_with(path, info, false)
+    }
+
+    /// Opens an intra-frame file already probed (such as an editing copy),
+    /// decoding for the quickest single frames rather than throughput.
+    pub fn open_intra(path: &Path, info: &VideoInfo) -> Result<VideoReader, MediaError> {
+        VideoReader::open_with(path, info, true)
+    }
+
+    fn open_with(path: &Path, info: &VideoInfo, intra: bool) -> Result<VideoReader, MediaError> {
         let err = decode_error(path);
         let first_pts = info.first_pts;
         let (input, stream) = open_input(path)?;
@@ -229,17 +269,7 @@ impl VideoReader {
             let s = &input.streams()[stream];
             (s.codecpar().clone(), s.time_base)
         };
-        let codec = rsmpeg::avcodec::AVCodec::find_decoder(par.codec_id)
-            .ok_or_else(|| err("no decoder for this codec".into()))?;
-        let mut decoder = AVCodecContext::new(&codec);
-        decoder
-            .apply_codecpar(&par)
-            .map_err(|e| err(e.to_string()))?;
-        // As many threads as there are cores, by frame and by slice.
-        let threads = rsmpeg::avutil::AVDictionary::new(c"threads", c"auto", 0);
-        decoder
-            .open(Some(threads))
-            .map_err(|e| err(e.to_string()))?;
+        let decoder = open_decoder(path, &par, None, intra)?;
         Ok(VideoReader {
             path: path.to_owned(),
             input,

@@ -6,8 +6,11 @@
 
 use fw_core::planar::{PlanarEncoding, Siting};
 
-/// Binding 0 is the output; planes follow from binding 1.
-pub(crate) fn planar(e: &PlanarEncoding) -> String {
+/// Binding 0 is the output; planes follow from binding 1. With `scale`
+/// (picture size over output size, per axis) the picture is resampled
+/// bilinearly to fill the output, as for an editing copy smaller than its
+/// original; without it, codes are read exactly, one per output pixel.
+pub(crate) fn planar(e: &PlanarEncoding, scale: Option<[f32; 2]>) -> String {
     let c = e.coefficients();
     let planes = if e.alpha { 4 } else { 3 };
     let mut w = String::new();
@@ -23,25 +26,39 @@ pub(crate) fn planar(e: &PlanarEncoding) -> String {
         Siting::Centred => ((1u32 << shift) as f32 - 1.0) / 2.0,
     };
     let (sx, sy) = e.chroma_shift;
+    w.push_str(
+        r#"
+fn code(t: texture_2d<u32>, p: vec2<u32>) -> f32 {
+    return f32(textureLoad(t, p, 0).r);
+}
+
+// Bilinear between the four codes around `u`, in `t`'s own sample grid.
+fn bilinear(t: texture_2d<u32>, u: vec2<f32>) -> f32 {
+    let last = textureDimensions(t) - vec2<u32>(1u);
+    let c = max(u, vec2<f32>(0.0));
+    let i = min(vec2<u32>(floor(c)), last);
+    let j = min(i + vec2<u32>(1u), last);
+    let f = c - vec2<f32>(i);
+    let top = code(t, i) * (1.0 - f.x) + code(t, vec2<u32>(j.x, i.y)) * f.x;
+    let bottom = code(t, vec2<u32>(i.x, j.y)) * (1.0 - f.x) + code(t, j) * f.x;
+    return top * (1.0 - f.y) + bottom * f.y;
+}
+"#,
+    );
+    // Where each output pixel falls in the picture's luma grid.
+    let (position, luma, alpha) = match scale {
+        None => ("vec2<f32>(p)".to_owned(), "code(p0, p)", "code(p3, p)"),
+        Some([kx, ky]) => (
+            format!("(vec2<f32>(p) + 0.5) * vec2<f32>({kx:?}, {ky:?}) - 0.5"),
+            "bilinear(p0, s)",
+            "bilinear(p3, s)",
+        ),
+    };
     w.push_str(&format!(
         r#"
-fn code(t: texture_2d<u32>, p: vec2<u32>) -> f32 {{
-    return f32(textureLoad(t, p, 0).r);
-}}
-
-// Bilinear between the chroma samples either side of luma position `p`.
-fn chroma(t: texture_2d<u32>, p: vec2<u32>) -> f32 {{
-    if ({subsampled}) {{
-        let last = textureDimensions(t) - vec2<u32>(1u);
-        let u = max((vec2<f32>(p) - vec2<f32>({fx:?}, {fy:?})) / vec2<f32>({kx:?}, {ky:?}), vec2<f32>(0.0));
-        let i = min(vec2<u32>(floor(u)), last);
-        let j = min(i + vec2<u32>(1u), last);
-        let f = u - vec2<f32>(i);
-        let top = code(t, i) * (1.0 - f.x) + code(t, vec2<u32>(j.x, i.y)) * f.x;
-        let bottom = code(t, vec2<u32>(i.x, j.y)) * (1.0 - f.x) + code(t, j) * f.x;
-        return top * (1.0 - f.y) + bottom * f.y;
-    }}
-    return code(t, p);
+// The chroma samples either side of luma position `s`, honouring siting.
+fn chroma(t: texture_2d<u32>, s: vec2<f32>) -> f32 {{
+    return bilinear(t, (s - vec2<f32>({fx:?}, {fy:?})) / vec2<f32>({kx:?}, {ky:?}));
 }}
 
 @compute @workgroup_size(8, 8)
@@ -50,10 +67,10 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
     if (any(p >= textureDimensions(dst))) {{
         return;
     }}
-    let codes = vec3<f32>(code(p0, p), chroma(p1, p), chroma(p2, p));
+    let s = {position};
+    let codes = vec3<f32>({luma}, chroma(p1, s), chroma(p2, s));
     let v = (codes - vec3<f32>({o0:?}, {o1:?}, {o2:?})) / vec3<f32>({s0:?}, {s1:?}, {s2:?});
 "#,
-        subsampled = sx > 0 || sy > 0,
         fx = first(sx, e.siting.0),
         fy = first(sy, e.siting.1),
         kx = (1u32 << sx) as f32,
@@ -76,7 +93,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
         )),
     }
     if e.alpha {
-        w.push_str(&format!("    let a = code(p3, p) / {:?};\n", c.alpha_max));
+        w.push_str(&format!("    let a = {alpha} / {:?};\n", c.alpha_max));
     } else {
         w.push_str("    let a = 1.0;\n");
     }

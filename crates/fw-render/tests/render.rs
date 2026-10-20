@@ -706,3 +706,108 @@ fn several_video_layers_each_show_their_own_frame() {
         0.5 * top
     );
 }
+
+#[test]
+fn draft_frames_come_from_editing_copies() {
+    use fw_compile::Step;
+    use fw_doc::{Placement, TimelineSettings, Track, TrackId, TrackKind};
+    use fw_media::CopyProfile;
+    let video = fw_testmedia::count_24fps();
+    let mut ids = SequentialIds::new(130);
+    let (root, track, clip) = (ids.next_id(), TrackId(ids.next_id()), ids.next_id());
+    let settings = TimelineSettings {
+        width: 64,
+        height: 32,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    let mut editor = Editor::new(
+        Document::new_timeline(root, settings),
+        Arc::new(fw_ops::builtin_registry()),
+    );
+    editor
+        .apply(
+            "Build",
+            vec![
+                Command::AddTrack {
+                    timeline: root,
+                    track: Track {
+                        id: track,
+                        kind: TrackKind::Video,
+                        name: "V1".into(),
+                    },
+                    index: 0,
+                },
+                Command::AddNode {
+                    parent: root,
+                    id: clip,
+                    type_id: "fw.clip".into(),
+                    name: None,
+                    placement: Some(Placement {
+                        track,
+                        start: Time::ZERO,
+                        duration: Time::from_seconds(2),
+                        source_in: Time::ZERO,
+                        speed: Time::from_seconds(1),
+                    }),
+                },
+                set(
+                    clip,
+                    "file",
+                    ParamValue::Media(MediaRef {
+                        path: video.display().to_string(),
+                    }),
+                ),
+            ],
+        )
+        .unwrap();
+    // A copy at half size, in chunks of 10 frames.
+    let profile = CopyProfile {
+        name: "test-half",
+        max_width: 32,
+        max_height: 16,
+        chunk_frames: 10,
+        prores_profile: 0,
+    };
+    let cache = tempfile::tempdir().unwrap();
+    let media = ProjectMedia::with_copies("/", cache.path(), profile);
+    let at = Time::of_frame(15, Time::from_seconds(24)).unwrap();
+    let plan_at = |quality| {
+        let mut options = Options::at(at);
+        options.quality = quality;
+        compile(editor.doc(), editor.registry(), &media, &options).unwrap()
+    };
+    let load = |plan: &Plan| {
+        plan.steps
+            .iter()
+            .find_map(|s| match s {
+                Step::Load(l) => Some(l.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    // Compiling asked for the copy; once it's made, drafts read it.
+    plan_at(fw_plugin::Quality::Final);
+    media.copies().unwrap().wait();
+    let (draft, last) = (
+        plan_at(fw_plugin::Quality::Draft),
+        plan_at(fw_plugin::Quality::Final),
+    );
+    let (draft_load, final_load) = (load(&draft), load(&last));
+    assert_eq!(draft_load.copy, Some("test-half"));
+    assert_eq!(final_load.copy, None);
+    assert_ne!(
+        draft_load.key, final_load.key,
+        "copy and original never share a cache entry"
+    );
+
+    let mut renderer = Renderer::new(gpu(), DEFAULT_CACHE_BYTES);
+    let want = (fw_testmedia::level(15) as f32 / 255.0).powf(2.4);
+    for (plan, what) in [(&draft, "draft, from the half-size copy"), (&last, "final")] {
+        let image = renderer.render(plan, &media).unwrap();
+        assert_eq!((image.width, image.height), (64, 32), "{what}");
+        let got = image.pixel(10, 10)[0];
+        assert!((got - want).abs() < 5e-3, "{what}: got {got}, want {want}");
+    }
+    assert_eq!(renderer.stats().decodes, 2);
+}

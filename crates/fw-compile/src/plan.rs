@@ -150,6 +150,10 @@ pub struct LoadStep {
     /// The node that loads it. Not part of the key: decoders use it to keep
     /// one reader per use of a file, so two clips of a file don't fight.
     pub node: Option<NodeId>,
+    /// Read the frame from this editing copy (a profile name) rather than
+    /// the original. Part of the key, so copy and original pixels never
+    /// share a cache entry. A copy may be smaller than `width` × `height`.
+    pub copy: Option<&'static str>,
 }
 
 /// An image of one colour, e.g. the transparent black of a timeline gap.

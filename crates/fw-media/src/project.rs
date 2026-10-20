@@ -10,6 +10,7 @@ use fw_compile::{Decoder, LoadStep, MediaInfo, MediaResolver};
 use fw_core::{DecodedImage, NodeId};
 use fw_plugin::MediaRef;
 
+use crate::copies::{CopyProfile, EditingCopies};
 use crate::{Format, VideoInfo, VideoReader, has_audio, probe_video};
 
 pub struct ProjectMedia {
@@ -25,6 +26,19 @@ pub struct ProjectMedia {
     probes: Mutex<HashMap<PathBuf, Probed>>,
     /// How many times a file was actually read to probe it. For tests.
     probe_reads: AtomicUsize,
+    /// Intra-frame copies that stand in for video at draft quality.
+    copies: Option<EditingCopies>,
+    /// Open readers on copy chunks, most recently used last.
+    copy_readers: Mutex<Vec<CopyReader>>,
+}
+
+/// Copy chunk readers kept open, at most. Opening one costs about 4 ms.
+const COPY_READERS: usize = 8;
+
+struct CopyReader {
+    chunk: PathBuf,
+    info: VideoInfo,
+    reader: VideoReader,
 }
 
 /// Readers kept open per file, at most.
@@ -55,7 +69,31 @@ impl ProjectMedia {
             readers: Mutex::new(HashMap::new()),
             probes: Mutex::new(HashMap::new()),
             probe_reads: AtomicUsize::new(0),
+            copies: None,
+            copy_readers: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Also makes editing copies (design §12) under `root`, in the
+    /// background, and reads them for draft-quality frames once ready.
+    pub fn with_copies(
+        base: impl Into<PathBuf>,
+        root: impl Into<PathBuf>,
+        profile: CopyProfile,
+    ) -> ProjectMedia {
+        ProjectMedia {
+            copies: Some(EditingCopies::new(root, profile)),
+            ..ProjectMedia::new(base)
+        }
+    }
+
+    /// The usual place for a project's editing copies: its cache folder.
+    pub fn copy_root(base: &Path) -> PathBuf {
+        base.join(".framewright").join("cache").join("copies")
+    }
+
+    pub fn copies(&self) -> Option<&EditingCopies> {
+        self.copies.as_ref()
     }
 
     pub fn resolve(&self, media: &MediaRef) -> PathBuf {
@@ -156,7 +194,69 @@ impl ProjectMedia {
 
 impl MediaResolver for ProjectMedia {
     fn probe(&self, media: &MediaRef) -> Result<MediaInfo, String> {
-        Ok(self.probed(&self.resolve(media))?.info)
+        let probed = self.probed(&self.resolve(media))?;
+        if let (Some(copies), Some(video)) = (&self.copies, &probed.video) {
+            copies.request(&probed.info.path, probed.info.fingerprint, video);
+        }
+        Ok(probed.info)
+    }
+
+    fn editing_copy(&self, media: &MediaInfo, frame: fw_core::Time) -> Option<&'static str> {
+        let copies = self.copies.as_ref()?;
+        let index = media.frames.as_ref()?.index_at(frame)?;
+        copies
+            .locate(&media.fingerprint, index)
+            .map(|_| copies.profile().name)
+    }
+}
+
+impl ProjectMedia {
+    /// The frame starting at `frame`, from the source's editing copy.
+    fn decode_copy(
+        &self,
+        load: &LoadStep,
+        video: &VideoInfo,
+        frame: fw_core::Time,
+    ) -> Result<DecodedImage, String> {
+        let copies = self.copies.as_ref().ok_or("editing copies are off")?;
+        let index = video
+            .frames
+            .index_at(frame)
+            .ok_or("the video has no frames")?;
+        let (chunk, within) = copies
+            .locate(&load.fingerprint, index)
+            .ok_or_else(|| format!("no editing copy of {}", load.path.display()))?;
+        let mut readers = self.copy_readers.lock().unwrap_or_else(|e| e.into_inner());
+        let at = match readers.iter().position(|r| r.chunk == chunk) {
+            Some(i) => {
+                let r = readers.remove(i);
+                readers.push(r);
+                readers.len() - 1
+            }
+            None => {
+                let info = probe_video(&chunk).map_err(|e| e.to_string())?;
+                let reader = VideoReader::open_intra(&chunk, &info).map_err(|e| e.to_string())?;
+                if readers.len() == COPY_READERS {
+                    readers.remove(0);
+                }
+                readers.push(CopyReader {
+                    chunk,
+                    info,
+                    reader,
+                });
+                readers.len() - 1
+            }
+        };
+        let r = &mut readers[at];
+        let time = r
+            .info
+            .frames
+            .time_of(within)
+            .ok_or("the copy chunk is short")?;
+        r.reader
+            .frame(time)
+            .map(DecodedImage::Planar)
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -171,6 +271,9 @@ impl Decoder for ProjectMedia {
             .probed(&load.path)?
             .video
             .ok_or_else(|| format!("{} is not a video", load.path.display()))?;
+        if load.copy.is_some() {
+            return self.decode_copy(load, &video, frame);
+        }
         let mut readers = self.readers.lock().unwrap_or_else(|e| e.into_inner());
         let readers = readers.entry(load.path.clone()).or_default();
         let used = readers.iter().map(|r| r.used).max().unwrap_or(0) + 1;

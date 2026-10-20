@@ -8,6 +8,7 @@
 //! stills, ICC profiles and PNG colour chunks.
 
 mod audio;
+mod copies;
 mod project;
 mod video;
 
@@ -15,6 +16,7 @@ pub use audio::{AudioReader, CHANNELS, has_audio};
 
 pub use video::{VideoInfo, VideoReader, probe_video};
 
+pub use copies::{CopyProfile, EditingCopies, PRORES_PROXY_1080, write_copy};
 pub use project::ProjectMedia;
 
 use std::fs::{self, File};

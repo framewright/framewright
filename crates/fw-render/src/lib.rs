@@ -362,7 +362,12 @@ impl Renderer {
                 let mut decoded = decoder.decode(load).map_err(error)?;
                 self.stats.decode_time += started.elapsed();
                 let (width, height) = decoded.size();
-                if (width, height) != (load.width, load.height) {
+                // An editing copy may be smaller; it's scaled up on the GPU.
+                let smaller_copy = load.copy.is_some()
+                    && matches!(decoded, DecodedImage::Planar(_))
+                    && width <= load.width
+                    && height <= load.height;
+                if (width, height) != (load.width, load.height) && !smaller_copy {
                     return Err(error(format!(
                         "expected {}×{}, decoded {width}×{height}",
                         load.width, load.height
@@ -380,7 +385,9 @@ impl Renderer {
         let started = std::time::Instant::now();
         let texture = match &*decoded {
             DecodedImage::Rgba(image) => self.upload_rgba(image),
-            DecodedImage::Planar(picture) => self.upload_planar(encoder, picture),
+            DecodedImage::Planar(picture) => {
+                self.upload_planar(encoder, picture, (load.width, load.height))
+            }
         };
         self.stats.upload_time += started.elapsed();
         Ok(texture)
@@ -404,11 +411,13 @@ impl Renderer {
         texture
     }
 
-    /// Uploads the planes as they are and converts them on the GPU.
+    /// Uploads the planes as they are and converts them on the GPU to a
+    /// `size` texture, resampling if the picture is a different size.
     fn upload_planar(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         picture: &PlanarImage,
+        size: (u32, u32),
     ) -> wgpu::Texture {
         let bytes = picture.bytes_per_sample();
         let format = if bytes == 1 {
@@ -434,8 +443,14 @@ impl Renderer {
                 texture
             })
             .collect();
-        let output = self.texture(picture.width, picture.height, FORMAT);
+        let output = self.texture(size.0, size.1, FORMAT);
         let output_view = output.create_view(&Default::default());
+        let scale = (size != (picture.width, picture.height)).then(|| {
+            [
+                picture.width as f32 / size.0 as f32,
+                picture.height as f32 / size.1 as f32,
+            ]
+        });
         let plane_views: Vec<wgpu::TextureView> = planes
             .iter()
             .map(|t| t.create_view(&Default::default()))
@@ -456,9 +471,9 @@ impl Renderer {
         self.run(
             encoder,
             LayoutKind::Planar(planes.len()),
-            &unpack::planar(&picture.encoding),
+            &unpack::planar(&picture.encoding, scale),
             &entries,
-            (picture.width, picture.height),
+            size,
         );
         self.uploading.extend(planes);
         output

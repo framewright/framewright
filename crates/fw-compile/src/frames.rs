@@ -24,19 +24,41 @@ impl FrameTimes {
     /// is the first frame; after the last it holds the last.
     /// TODO: let clips choose what happens past the media's ends.
     pub fn frame_at(&self, t: Time) -> Option<Time> {
+        self.time_of(self.index_at(t)?)
+    }
+
+    /// The index of the frame showing at `t`, held at the ends as
+    /// [`FrameTimes::frame_at`] does.
+    pub fn index_at(&self, t: Time) -> Option<u64> {
         match self {
             FrameTimes::Constant { start, rate, count } => {
                 if *count == 0 {
                     return None;
                 }
                 let since = t.checked_sub(*start).ok()?;
-                let index = since.frame_index(*rate).ok()?.clamp(0, *count as i64 - 1);
-                start.checked_add(Time::of_frame(index, *rate).ok()?).ok()
+                Some(since.frame_index(*rate).ok()?.clamp(0, *count as i64 - 1) as u64)
             }
             FrameTimes::Variable(times) => {
-                let after = times.partition_point(|f| *f <= t);
-                times.get(after.saturating_sub(1)).copied()
+                if times.is_empty() {
+                    return None;
+                }
+                Some(times.partition_point(|f| *f <= t).saturating_sub(1) as u64)
             }
+        }
+    }
+
+    /// The start time of frame `index`.
+    pub fn time_of(&self, index: u64) -> Option<Time> {
+        match self {
+            FrameTimes::Constant { start, rate, count } => {
+                if index >= *count {
+                    return None;
+                }
+                start
+                    .checked_add(Time::of_frame(index as i64, *rate).ok()?)
+                    .ok()
+            }
+            FrameTimes::Variable(times) => times.get(index as usize).copied(),
         }
     }
 }

@@ -106,6 +106,13 @@ const BUDGETS: &[Budget] = &[
         run: scrub,
     },
     Budget {
+        name: "scrub-1080p-copy",
+        what: "Render a random 1080p frame at draft quality, from its editing copy (GPU finished)",
+        statistic: Statistic::P95,
+        limit: ms(50.0),
+        run: scrub_copy,
+    },
+    Budget {
         name: "audio-block-8-voices",
         what: "Mix one 512-frame block of eight streaming voices on the audio thread",
         statistic: Statistic::P99,
@@ -307,16 +314,48 @@ fn playback(f: &Fixture, editor: &Editor) -> Vec<Duration> {
 }
 
 fn scrub(f: &Fixture) -> Vec<Duration> {
+    scrub_frames(f.frames(&f.editor))
+}
+
+fn scrub_copy(f: &Fixture) -> Vec<Duration> {
     let mut frames = f.frames(&f.editor);
+    frames.media = ProjectMedia::with_copies(
+        f.folder,
+        fw_testmedia::hd_h264().with_file_name("copies"),
+        fw_media::PRORES_PROXY_1080,
+    );
+    frames.options.quality = fw_plugin::Quality::Draft;
+    // Making the copy is setup, not timed; later runs find it on disk.
     render_frame(&mut frames, 0);
+    frames.media.copies().expect("copies are on").wait();
+    scrub_frames(frames)
+}
+
+fn scrub_frames(mut frames: DocumentFrames) -> Vec<Duration> {
+    render_frame(&mut frames, 0);
+    let before = frames.renderer.stats().clone();
+    let mut gpu = Duration::ZERO;
     // A fixed, scattered order, so runs are comparable.
     let mut index = 17i64;
-    (0..30)
+    let samples: Vec<Duration> = (0..30)
         .map(|_| {
             index = (index * 97 + 31) % 239;
-            time(|| render_frame(&mut frames, index))
+            time(|| gpu += render_frame(&mut frames, index))
         })
-        .collect()
+        .collect();
+    let after = frames.renderer.stats();
+    let per = |d: Duration| format_ms(d / samples.len() as u32);
+    let mut sorted = samples.clone();
+    sorted.sort();
+    eprintln!(
+        "  per frame: mean {}, median {}; decode {}, upload {}, waiting for the GPU {}",
+        per(samples.iter().sum()),
+        format_ms(sorted[sorted.len() / 2]),
+        per(after.decode_time - before.decode_time),
+        per(after.upload_time - before.upload_time),
+        per(gpu),
+    );
+    samples
 }
 
 fn audio_block(f: &Fixture) -> Vec<Duration> {

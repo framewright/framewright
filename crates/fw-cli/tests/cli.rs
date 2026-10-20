@@ -209,3 +209,33 @@ fn plays_a_timeline_against_the_clock() {
         .unwrap_or_else(|| panic!("{report}"));
     assert!(shown >= 30, "{report}");
 }
+
+#[test]
+fn makes_editing_copies_in_the_project_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = video_project(dir.path());
+    let report = fw(&["copies", &project]);
+    assert!(
+        report.lines().last().unwrap().starts_with("done in"),
+        "{report}"
+    );
+    let copies = dir
+        .path()
+        .join(".framewright/cache/copies/prores-proxy-1080-v1");
+    let chunks: Vec<_> = std::fs::read_dir(&copies)
+        .unwrap()
+        .flat_map(|copy| std::fs::read_dir(copy.unwrap().path()).unwrap())
+        .map(|chunk| chunk.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(chunks, ["chunk-000000.mov"], "{report}");
+    // Playing uses them; with --no-copies it doesn't need them.
+    for extra in [None, Some("--no-copies")] {
+        let mut args = vec!["play", &project, "--seconds", "1", "--no-audio"];
+        args.extend(extra);
+        let report = fw(&args);
+        assert!(
+            report.lines().last().unwrap().contains("0 failed"),
+            "{report}"
+        );
+    }
+}

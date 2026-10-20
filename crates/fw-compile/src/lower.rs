@@ -584,6 +584,13 @@ impl PlanBuilder for NodeBuilder<'_, '_> {
         if let Some(frame) = frame {
             key.time(frame);
         }
+        let copy = match (frame, self.lowering.options.quality) {
+            (Some(frame), Quality::Draft) => self.lowering.media.editing_copy(&found, frame),
+            _ => None,
+        };
+        if let Some(profile) = copy {
+            key.str("copy").str(profile);
+        }
         let region = Rect::from_size(found.width as f64, found.height as f64);
         let info = ImageInfo {
             space,
@@ -609,6 +616,7 @@ impl PlanBuilder for NodeBuilder<'_, '_> {
                     Origin::Node { node, .. } => Some(*node),
                     _ => None,
                 },
+                copy,
             }),
             info,
             key,

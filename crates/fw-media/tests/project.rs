@@ -43,6 +43,7 @@ fn probes_are_cached_until_the_file_changes() {
         region: fw_core::Rect::from_size(64.0, 32.0),
         frame: Some("1/10".parse().unwrap()),
         node: None,
+        copy: None,
     };
     let image = media.decode(&plan_frame).unwrap().to_rgba();
     assert_eq!(
@@ -76,6 +77,7 @@ fn two_clips_of_one_file_each_get_their_frames() {
         region: fw_core::Rect::from_size(64.0, 32.0),
         frame: Some(Time::of_frame(n, Time::from_seconds(24)).unwrap()),
         node: Some(nodes[node]),
+        copy: None,
     };
     // Two clips playing side by side from different places in the file.
     for n in 0..12 {

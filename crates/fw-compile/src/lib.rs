@@ -49,6 +49,13 @@ pub struct MediaInfo {
 
 pub trait MediaResolver {
     fn probe(&self, media: &MediaRef) -> Result<MediaInfo, String>;
+
+    /// The editing copy (design §12) that can stand in for the video frame
+    /// starting at `frame`, named by its profile, if one is ready. Asked only
+    /// at draft quality.
+    fn editing_copy(&self, _media: &MediaInfo, _frame: Time) -> Option<&'static str> {
+        None
+    }
 }
 
 /// Decodes the file a load step names, for the renderer. Kept beside
