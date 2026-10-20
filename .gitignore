@@ -1,3 +1,6 @@
 target/
 # Throwaway toolkit bake-off; kept on disk, never committed.
 spikes/
+
+# Trail's build cache for docs/learn.
+.trail-cache/

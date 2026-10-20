@@ -1,0 +1,6 @@
+sitename = "Framewright Docs"
+title = "Framewright Docs"
+accent = "#e8a33d"
+description = "Using Framewright Studio, a photo and video editor for montages cut to music."
+footer = "Framewright"
+featured = ["framewright"]
