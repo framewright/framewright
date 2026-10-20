@@ -304,7 +304,7 @@ fn open_in_compose_from_the_clip_menu_and_back() {
     harness.run_steps(3);
     let engine = &harness.state().1;
     assert_eq!(clip_graph(engine, clip), Some(2), "Input and Output");
-    assert_eq!(engine.undo_label(), Some("Create Clip Graph"));
+    assert_eq!(engine.undo_label(), None, "opening edits nothing");
     assert!(harness.query_by_label("Node Input").is_some());
     assert!(harness.query_by_label("Node Output").is_some());
     assert!(
@@ -322,36 +322,50 @@ fn open_in_compose_from_the_clip_menu_and_back() {
     assert!(harness.query_by_label("Clip Counting").is_some());
     assert!(harness.query_by_label("Node Input").is_none());
 
-    // Opening again steps into the same graph without another edit.
+    // Enter opens it too.
     harness.key_press(egui::Key::Enter);
     harness.run_steps(2);
     assert!(harness.query_by_label("Node Input").is_some());
-    assert_eq!(harness.state().1.undo_label(), Some("Create Clip Graph"));
 }
 
 #[test]
-fn undo_while_composing_returns_to_the_timeline() {
+fn compose_stays_open_through_undo_until_its_clip_goes() {
     let Project { _dir, clip, engine } = project();
     let mut harness = harness(engine);
     harness.run_steps(2);
     harness.get_by_label("Compose").click();
     harness.run_steps(2);
-    assert_eq!(
-        clip_graph(&harness.state().1, clip),
-        None,
+    assert!(
+        harness.query_by_label("Node Input").is_none(),
         "nothing to open without a selected clip"
     );
     select_clip(&mut harness);
     harness.get_by_label("Compose").click();
     harness.run_steps(2);
-    assert_eq!(clip_graph(&harness.state().1, clip), Some(2));
     assert!(harness.query_by_label("Node Input").is_some());
 
+    // Undoing an edit made in the graph stays in the graph.
+    let from = harness.get_by_label("Node Input").rect().center();
+    drag(&mut harness, from, from + egui::vec2(0.0, 80.0));
+    assert_eq!(harness.state().1.undo_label(), Some("Move Node"));
     harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
     harness.run_steps(3);
-    assert_eq!(clip_graph(&harness.state().1, clip), None);
+    assert!(harness.query_by_label("Node Input").is_some());
+    assert!(harness.state().1.document().keeps_starting_graph(clip));
+
+    // The clip going away takes the page back to the timeline.
+    let delete = fw_engine::Request::Edit {
+        label: "Delete Clip".into(),
+        commands: vec![fw_doc::Command::RemoveNode { id: clip }],
+        gesture: None,
+    };
+    harness.state_mut().1.request(delete).unwrap();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Node Input").is_none());
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(3);
     assert!(
         harness.query_by_label("Clip Counting").is_some(),
-        "back on the Edit page"
+        "back on the Edit page, where undo brings the clip back"
     );
 }

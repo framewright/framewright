@@ -2,7 +2,7 @@
 //! opened in the node editor with Tab or a right-click.
 
 use egui::{Align2, CornerRadius, Key, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
-use fw_plugin::{CLIP_TYPE, INPUT_TYPE, NodeTypeDesc, Registry};
+use fw_plugin::{INPUT_TYPE, NodeTypeDesc, Registry};
 
 use crate::style::{sans, tokens as t};
 
@@ -50,8 +50,9 @@ fn addable<'a>(registry: &'a Registry, query: &str, supplied: bool) -> Vec<&'a N
     let mut types: Vec<&NodeTypeDesc> = registry
         .iter()
         .map(|ty| &ty.desc)
-        // Containers are made by their own commands, and clips belong on timelines.
-        .filter(|d| d.container.is_none() && d.id != CLIP_TYPE)
+        // Containers are made by their own commands, and clips (Graph
+        // containers too) belong on timelines.
+        .filter(|d| d.container.is_none())
         .filter(|d| supplied || d.id != INPUT_TYPE)
         .filter(|d| {
             query.is_empty()

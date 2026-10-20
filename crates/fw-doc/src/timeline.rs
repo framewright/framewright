@@ -1,6 +1,6 @@
 //! The contents of a Timeline container: tracks, and clips placed on them.
 //!
-//! Each clip is a child node (plain clips are `fw.clip`), and its placement
+//! Each clip is a child node (usually `fw.clip`), and its placement
 //! lives here in the container, never inside the node.
 
 use std::fmt;

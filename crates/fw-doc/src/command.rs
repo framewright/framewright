@@ -9,6 +9,7 @@ use fw_plugin::{ContainerKind, Registry};
 use imbl::OrdMap;
 use serde::{Deserialize, Serialize};
 
+use crate::clip_graph::{add_starting_graph, clip_graph_ids, starts_with_graph};
 use crate::document::Document;
 use crate::node::{Contents, Edge, Graph, KnownNode, Node, PortRef};
 use crate::param::{Param, ParamError};
@@ -73,14 +74,6 @@ pub enum Command {
         node: NodeId,
         position: Option<[f64; 2]>,
     },
-    /// Gives a node whose type can hold a graph an empty one (Open in Compose).
-    MakeGraph {
-        node: NodeId,
-    },
-    /// Takes away a node's empty graph, leaving the plain node.
-    RemoveGraph {
-        node: NodeId,
-    },
     /// Inserts a track at `index` (0 is the bottom).
     AddTrack {
         timeline: NodeId,
@@ -137,14 +130,6 @@ pub enum CommandError {
     Track(String),
     #[error("node position: {0}")]
     Position(String),
-    #[error("node {0}'s type can't hold a graph")]
-    CantHoldGraph(NodeId),
-    #[error("node {0} already holds a graph")]
-    HasGraph(NodeId),
-    #[error("node {0} holds no graph of its own")]
-    NoGraph(NodeId),
-    #[error("node {0}'s graph still has nodes in it")]
-    GraphNotEmpty(NodeId),
 }
 
 impl Command {
@@ -159,7 +144,19 @@ impl Command {
     /// The nodes this command changes, for change events.
     pub fn touched(&self) -> Vec<NodeId> {
         match self {
-            Command::AddNode { parent, id, .. } => vec![*parent, *id],
+            Command::AddNode {
+                parent,
+                id,
+                type_id,
+                ..
+            } => {
+                let mut touched = vec![*parent, *id];
+                if starts_with_graph(type_id) {
+                    let (input, output) = clip_graph_ids(*id);
+                    touched.extend([input, output]);
+                }
+                touched
+            }
             Command::RemoveNode { id } => vec![*id],
             Command::RestoreNodes { parent, nodes, .. } => std::iter::once(*parent)
                 .chain(nodes.iter().map(|(id, _)| *id))
@@ -167,10 +164,7 @@ impl Command {
             Command::SetParam { node, .. } | Command::Rename { node, .. } => vec![*node],
             Command::Connect { edge } => vec![edge.from.node, edge.to.node],
             Command::Disconnect { input } => vec![input.node],
-            Command::SetPlacement { node, .. }
-            | Command::SetPosition { node, .. }
-            | Command::MakeGraph { node }
-            | Command::RemoveGraph { node } => vec![*node],
+            Command::SetPlacement { node, .. } | Command::SetPosition { node, .. } => vec![*node],
             Command::AddTrack { timeline, .. } | Command::RemoveTrack { timeline, .. } => {
                 vec![*timeline]
             }
@@ -192,12 +186,17 @@ impl Command {
                 let desc = registry
                     .desc(type_id)
                     .ok_or_else(|| CommandError::UnknownType(type_id.clone()))?;
+                let contents = if starts_with_graph(type_id) {
+                    Some(Contents::Graph(add_starting_graph(doc, registry, *id)?))
+                } else {
+                    desc.container.map(empty_contents)
+                };
                 let node = Node::Known(KnownNode {
                     type_id: type_id.clone(),
                     version: desc.version,
                     name: name.clone().unwrap_or_else(|| desc.name.clone()),
                     params: OrdMap::new(),
-                    contents: desc.container.map(empty_contents),
+                    contents,
                 });
                 place(doc, *parent, *id, placement.clone(), None, &[])?;
                 doc.nodes.insert(*id, node);
@@ -377,38 +376,6 @@ impl Command {
                     node: *node,
                     position: old,
                 })
-            }
-
-            Command::MakeGraph { node } => {
-                let known = known_mut(doc, *node)?;
-                let desc = registry
-                    .desc(&known.type_id)
-                    .ok_or_else(|| CommandError::UnknownType(known.type_id.clone()))?;
-                if !desc.can_hold_graph {
-                    return Err(CommandError::CantHoldGraph(*node));
-                }
-                if known.contents.is_some() {
-                    return Err(CommandError::HasGraph(*node));
-                }
-                known.contents = Some(Contents::Graph(Graph::default()));
-                Ok(Command::RemoveGraph { node: *node })
-            }
-
-            Command::RemoveGraph { node } => {
-                let known = known_mut(doc, *node)?;
-                let desc = registry
-                    .desc(&known.type_id)
-                    .ok_or_else(|| CommandError::UnknownType(known.type_id.clone()))?;
-                match &known.contents {
-                    Some(Contents::Graph(g)) if desc.can_hold_graph => {
-                        if !g.nodes.is_empty() {
-                            return Err(CommandError::GraphNotEmpty(*node));
-                        }
-                    }
-                    _ => return Err(CommandError::NoGraph(*node)),
-                }
-                known.contents = None;
-                Ok(Command::MakeGraph { node: *node })
             }
 
             Command::AddTrack {
@@ -654,15 +621,6 @@ fn port_type(
     p.map(|p| p.ty)
 }
 
-/// Whether a node of type `desc` may have contents of `kind`: its container
-/// kind, or a graph when the type can hold one.
-pub(crate) fn contents_allowed(
-    kind: Option<ContainerKind>,
-    desc: &fw_plugin::NodeTypeDesc,
-) -> bool {
-    kind == desc.container || (kind == Some(ContainerKind::Graph) && desc.can_hold_graph)
-}
-
 /// Checks a known node against its registered type. Unknown nodes are kept as they are.
 pub(crate) fn check_node(id: NodeId, node: &Node, registry: &Registry) -> Result<(), CommandError> {
     let Node::Known(known) = node else {
@@ -681,7 +639,7 @@ pub(crate) fn check_node(id: NodeId, node: &Node, registry: &Registry) -> Result
         Contents::Graph(_) => ContainerKind::Graph,
         Contents::Timeline(_) => ContainerKind::Timeline,
     });
-    if !contents_allowed(kind, desc) {
+    if kind != desc.container {
         return Err(CommandError::InvalidRestore(format!(
             "{id} has the wrong contents for its type"
         )));

@@ -296,12 +296,14 @@ fn validate(wgsl: &str) {
 }
 
 #[test]
-fn a_clip_with_a_graph_shows_its_media_through_the_graph() {
+fn a_clip_shows_its_media_through_its_graph() {
     let mut s = Sample::new();
     let v1 = s.v1;
     let clip = s.clip("clip.mov", placement(v1, "0", "4"));
+    let (input, output) = fw_doc::clip_graph_ids(clip);
     let plain = s.plan("1");
-    let [input, exposure, output] = [(); 3].map(|_| s.ids.next_id());
+    assert_eq!(shown(&plain), "clip.mov@1", "Input is the clip's media");
+    let exposure = s.ids.next_id();
     let add = |id, type_id: &str| Command::AddNode {
         parent: clip,
         id,
@@ -315,22 +317,6 @@ fn a_clip_with_a_graph_shows_its_media_through_the_graph() {
             to: fw_doc::PortRef::new(to, "image"),
         },
     };
-    s.editor
-        .apply(
-            "Create Clip Graph",
-            vec![
-                Command::MakeGraph { node: clip },
-                add(input, "fw.input"),
-                add(output, "fw.output"),
-                connect(input, output),
-            ],
-        )
-        .unwrap();
-    assert_eq!(
-        shown(&s.plan("1")),
-        "clip.mov@1",
-        "Input is the clip's media"
-    );
     s.editor
         .apply(
             "Add Exposure",
@@ -372,4 +358,26 @@ fn a_clip_with_a_graph_shows_its_media_through_the_graph() {
         "{err}"
     );
     assert!(err.to_string().contains("no Output"), "{err}");
+}
+
+#[test]
+fn a_clips_starting_graph_adds_no_work() {
+    let mut s = Sample::new();
+    let (v1, v2) = (s.v1, s.v2);
+    s.clip("under.png", placement(v1, "0", "4"));
+    let top = s.clip("over.png", placement(v2, "0", "4"));
+    set(&mut s, top, "composite", ParamValue::Text("add".into()));
+    let plan = s.plan("1");
+    let described = plan.describe();
+    // Output inside a clip leaves delivering to the timeline, so a layer
+    // isn't taken to the delivery space and back.
+    assert_eq!(
+        described.matches("inserted:").count(),
+        3,
+        "each layer converts once, then the result: {described}"
+    );
+    assert!(
+        !described.contains("Linear Rec.709 → ACEScg"),
+        "{described}"
+    );
 }

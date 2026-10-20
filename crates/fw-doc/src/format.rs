@@ -30,7 +30,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
-use crate::command::{check_node, contents_allowed};
+use crate::clip_graph::{add_starting_graph, starts_with_graph};
+use crate::command::check_node;
 use crate::document::Document;
 use crate::node::{Contents, Edge, Graph, KnownNode, Node, UnknownNode};
 use crate::param::Param;
@@ -160,11 +161,19 @@ fn node_out(doc: &Document, id: NodeId) -> NodeOut<'_> {
             version: n.version,
             name: &n.name,
             params: n.params.iter().map(|(k, v)| (k.as_str(), v)).collect(),
-            graph: n.graph_contents().map(|g| GraphOut {
-                nodes: g.nodes.iter().map(|c| (*c, node_out(doc, *c))).collect(),
-                edges: g.edges().collect(),
-                positions: g.positions.iter().map(|(id, p)| (*id, *p)).collect(),
-            }),
+            // A clip's graph is left out while it's still the one it started with.
+            graph: n
+                .graph_contents()
+                .filter(|g| {
+                    !(starts_with_graph(&n.type_id)
+                        && g.positions.is_empty()
+                        && doc.keeps_starting_graph(id))
+                })
+                .map(|g| GraphOut {
+                    nodes: g.nodes.iter().map(|c| (*c, node_out(doc, *c))).collect(),
+                    edges: g.edges().collect(),
+                    positions: g.positions.iter().map(|(id, p)| (*id, *p)).collect(),
+                }),
             timeline: n.timeline_contents().map(|t| TimelineOut {
                 width: t.settings.width,
                 height: t.settings.height,
@@ -317,10 +326,13 @@ fn read_node(
             return Err(err("a node can't hold both a graph and a timeline".into()));
         }
     };
-    if !contents_allowed(kind, desc) {
+    let mut contents = None;
+    if kind.is_none() && starts_with_graph(&desc.id) {
+        let graph = add_starting_graph(doc, registry, id).map_err(|e| err(e.to_string()))?;
+        contents = Some(Contents::Graph(graph));
+    } else if kind != desc.container {
         return Err(err(format!("contents don't match the type {}", desc.id)));
     }
-    let mut contents = None;
     if let Some(graph) = node.graph {
         let mut g = Graph::default();
         for (child, child_raw) in &graph.nodes {

@@ -10,7 +10,8 @@ pub const GRAPH_TYPE: &str = "fw.graph";
 /// The type id of the Timeline container. A video document's root is one.
 pub const TIMELINE_TYPE: &str = "fw.timeline";
 
-/// The type id of the plain clip: media placed on a timeline, with no graph.
+/// The type id of the clip: media placed on a timeline, with a graph inside
+/// that works on it.
 pub const CLIP_TYPE: &str = "fw.clip";
 
 /// The type id of the Output node, which marks what a Graph container delivers.
@@ -44,10 +45,6 @@ pub struct NodeTypeDesc {
     pub varies_with_time: bool,
     /// Set when the type stores its contents in a container structure.
     pub container: Option<ContainerKind>,
-    /// Set when a node of this type may be given a graph inside it (Open in
-    /// Compose). Its image behaviour then receives the graph's result as its
-    /// one input.
-    pub can_hold_graph: bool,
 }
 
 impl NodeTypeDesc {

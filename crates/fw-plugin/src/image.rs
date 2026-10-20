@@ -87,6 +87,8 @@ pub enum SpaceNeed {
     Working,
     Exact(ColorSpace),
     /// The space being delivered, e.g. what an output file is encoded in.
+    /// Inside a graph held by another node, such as a clip's, the image is
+    /// left as it is for that node to deliver.
     Delivery,
 }
 
@@ -165,8 +167,9 @@ pub trait ImageBehaviour: Send + Sync {
         Ok(None)
     }
 
-    /// Adds this node's operations and returns its output. When the node holds
-    /// a graph, `inputs` is that graph's result alone.
+    /// Adds this node's operations and returns its output. When the node is a
+    /// Graph container with a behaviour of its own (a clip), `inputs` is its
+    /// graph's result alone.
     fn emit(
         &self,
         params: &ResolvedParams,

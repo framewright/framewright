@@ -31,7 +31,7 @@
             "duration": "4",
             "source_in": "0",
             "node": {
-              "type": "test.clip",
+              "type": "fw.clip",
               "version": 1,
               "name": "Clip",
               "params": {
@@ -59,7 +59,7 @@
             "source_in": "10",
             "speed": "1/2",
             "node": {
-              "type": "test.clip",
+              "type": "fw.clip",
               "version": 1,
               "name": "Clip"
             }

@@ -22,6 +22,16 @@ impl NodeId {
     pub fn to_bytes(self) -> [u8; 16] {
         self.0.to_bytes()
     }
+
+    /// An id worked out from this one and `role`, for a node that comes with
+    /// this one (a clip's Input and Output), so files needn't store it.
+    pub fn derived(self, role: &str) -> NodeId {
+        let mut hasher = blake3::Hasher::new_derive_key("framewright node id");
+        hasher.update(&self.to_bytes()).update(role.as_bytes());
+        let mut bytes = [0; 16];
+        bytes.copy_from_slice(&hasher.finalize().as_bytes()[..16]);
+        NodeId(Ulid::from_bytes(bytes))
+    }
 }
 
 impl fmt::Display for NodeId {
@@ -95,5 +105,15 @@ mod tests {
         assert_eq!(a.to_string().parse::<NodeId>().unwrap(), a);
         let json = serde_json::to_string(&a).unwrap();
         assert_eq!(serde_json::from_str::<NodeId>(&json).unwrap(), a);
+    }
+
+    #[test]
+    fn derived_ids_depend_on_the_id_and_the_role() {
+        let mut ids = SequentialIds::new(7);
+        let (a, b) = (ids.next_id(), ids.next_id());
+        assert_eq!(a.derived("input"), a.derived("input"));
+        assert_ne!(a.derived("input"), a.derived("output"));
+        assert_ne!(a.derived("input"), b.derived("input"));
+        assert_ne!(a.derived("input"), a);
     }
 }

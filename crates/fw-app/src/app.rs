@@ -2,9 +2,8 @@
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Stroke, Ui, vec2};
 use egui_tiles::{TileId, Tiles, Tree};
-use fw_core::id::{IdGen, RandomIds};
 use fw_core::{NodeId, Time};
-use fw_doc::{Command, Edge, PortRef};
+use fw_doc::Command;
 use fw_engine::{Engine, MediaSummary, Request};
 
 use crate::chrome::{self, AppCommand, TitleBar, WindowAction, Workspace};
@@ -139,7 +138,6 @@ pub struct App {
     node_editor: NodeEditor,
     /// The media the document uses, as of this frame.
     media: Vec<MediaSummary>,
-    ids: RandomIds,
 }
 
 impl App {
@@ -170,7 +168,6 @@ impl App {
             timeline: TimelineView::default(),
             node_editor: NodeEditor::default(),
             media: vec![],
-            ids: RandomIds::default(),
         }
     }
 
@@ -378,7 +375,7 @@ impl App {
                 if let Some(clip) = self.selected.filter(|id| is_clip(engine, *id))
                     && matches!(self.page, Page::Edit)
                 {
-                    self.open_in_compose(clip, engine);
+                    self.open_in_compose(clip);
                 }
                 return;
             }
@@ -388,7 +385,7 @@ impl App {
             }
             AppCommand::Workspace("Compose") => {
                 match self.selected.filter(|id| is_clip(engine, *id)) {
-                    Some(clip) => self.open_in_compose(clip, engine),
+                    Some(clip) => self.open_in_compose(clip),
                     None => {
                         self.message = Some("Select a clip to open it in Compose".into());
                     }
@@ -410,45 +407,8 @@ impl App {
         }
     }
 
-    /// Steps into `clip`'s graph, first giving it one that passes its media
-    /// straight through (Input → Output) when it has none.
-    fn open_in_compose(&mut self, clip: NodeId, engine: &mut Engine) {
-        if engine.document().graph(clip).is_none() {
-            let (input, output) = (self.ids.next_id(), self.ids.next_id());
-            let add = |id, type_id: &str, x: f64| {
-                [
-                    Command::AddNode {
-                        parent: clip,
-                        id,
-                        type_id: type_id.into(),
-                        name: None,
-                        placement: None,
-                    },
-                    Command::SetPosition {
-                        node: id,
-                        position: Some([x, 0.0]),
-                    },
-                ]
-            };
-            let mut commands = vec![Command::MakeGraph { node: clip }];
-            commands.extend(add(input, fw_plugin::INPUT_TYPE, 0.0));
-            commands.extend(add(output, fw_plugin::OUTPUT_TYPE, 260.0));
-            commands.push(Command::Connect {
-                edge: Edge {
-                    from: PortRef::new(input, "image"),
-                    to: PortRef::new(output, "image"),
-                },
-            });
-            let request = Request::Edit {
-                label: "Create Clip Graph".into(),
-                commands,
-                gesture: None,
-            };
-            if let Err(e) = engine.request(request) {
-                self.message = Some(e.to_string());
-                return;
-            }
-        }
+    /// Steps into `clip`'s graph.
+    fn open_in_compose(&mut self, clip: NodeId) {
         self.page = Page::Compose(clip);
         self.selected = None;
         self.node_editor.frame_all(clip);

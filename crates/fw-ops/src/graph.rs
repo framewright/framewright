@@ -14,6 +14,5 @@ pub fn node_type() -> NodeType {
         params: vec![],
         varies_with_time: false,
         container: Some(ContainerKind::Graph),
-        can_hold_graph: false,
     })
 }

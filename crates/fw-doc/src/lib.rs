@@ -4,6 +4,7 @@
 //! hold child nodes and the connections between them. Every edit is a
 //! [`Command`], applied through an [`Editor`] that keeps undo history.
 
+pub mod clip_graph;
 pub mod command;
 pub mod document;
 pub mod format;
@@ -13,6 +14,7 @@ pub mod param;
 pub mod save;
 pub mod timeline;
 
+pub use clip_graph::clip_graph_ids;
 pub use command::{Command, CommandError};
 pub use document::Document;
 pub use history::{Cause, Editor, Event};

@@ -400,11 +400,17 @@ impl Lowering<'_> {
                 .clone();
             let image = self.node(path, source.node, input_request, clock)?;
             let wanted = match behaviour.input_space(&params, index) {
-                SpaceNeed::Working => self.options.working_space,
-                SpaceNeed::Exact(space) => space,
-                SpaceNeed::Delivery => self.options.delivery_space,
+                SpaceNeed::Working => Some(self.options.working_space),
+                SpaceNeed::Exact(space) => Some(space),
+                // Inside a graph held by another node (a clip's), that node
+                // does the delivering, so the image goes up as it is.
+                SpaceNeed::Delivery if !self.sources.is_empty() => None,
+                SpaceNeed::Delivery => Some(self.options.delivery_space),
             };
-            inputs.push(self.convert(image, wanted));
+            inputs.push(match wanted {
+                Some(space) => self.convert(image, space),
+                None => image,
+            });
         }
         self.emit(
             id,

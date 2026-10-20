@@ -1,7 +1,8 @@
-//! The Timeline container and the plain clip.
+//! The Timeline container and the clip.
 //!
-//! The Timeline's lowering lives in the compiler. A plain clip is media placed
-//! on a timeline with no graph inside: "media → output", stored compactly.
+//! The Timeline's lowering lives in the compiler. A clip is media placed on a
+//! timeline, with a graph inside that starts as Input → Output and is stored
+//! compactly until it changes.
 
 use fw_plugin::{
     AudioBehaviour, AudioBlock, AudioProcessor, CLIP_TYPE, ContainerKind, ImageBehaviour,
@@ -22,7 +23,6 @@ pub fn timeline_type() -> NodeType {
         params: vec![],
         varies_with_time: false,
         container: Some(ContainerKind::Timeline),
-        can_hold_graph: false,
     })
 }
 
@@ -48,9 +48,8 @@ pub fn clip_type() -> NodeType {
         // Time reaches the cache key through the frame the load picks, so a
         // still image keys the same at every moment.
         varies_with_time: false,
-        container: None,
-        // Open in Compose gives a clip a graph, starting from its media.
-        can_hold_graph: true,
+        // Its graph, opened in Compose, works on its media.
+        container: Some(ContainerKind::Graph),
     };
     NodeType::new(desc)
         .with_image(Clip, "clip r2")
@@ -75,20 +74,15 @@ impl ImageBehaviour for Clip {
             .map(Some)
     }
 
-    /// The media, or the clip's graph when it has one, at the clip's opacity.
+    /// What the clip's graph made of its media, at the clip's opacity.
     fn emit(
         &self,
         params: &ResolvedParams,
-        request: &Request,
+        _request: &Request,
         inputs: &[ImageHandle],
         plan: &mut dyn PlanBuilder,
     ) -> Result<ImageHandle, NodeError> {
-        let image = match inputs.first() {
-            Some(graph) => *graph,
-            None => self
-                .source(params, request, plan)?
-                .expect("a clip supplies its media"),
-        };
+        let image = inputs[0];
         let opacity = params.f64("opacity") / 100.0;
         if opacity == 1.0 {
             return Ok(image);

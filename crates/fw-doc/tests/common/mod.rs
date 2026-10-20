@@ -3,7 +3,8 @@
 #![allow(dead_code)]
 
 use fw_plugin::{
-    ContainerKind, NodeType, NodeTypeDesc, ParamDesc, PortDesc, PortType, Registry, Unit,
+    CLIP_TYPE, ContainerKind, INPUT_TYPE, NodeType, NodeTypeDesc, OUTPUT_TYPE, ParamDesc, PortDesc,
+    PortType, Registry, Unit,
 };
 
 pub fn desc(id: &str, name: &str) -> NodeTypeDesc {
@@ -17,14 +18,12 @@ pub fn desc(id: &str, name: &str) -> NodeTypeDesc {
         params: vec![],
         varies_with_time: false,
         container: None,
-        can_hold_graph: false,
     }
 }
 
 pub fn graph_type() -> NodeTypeDesc {
     NodeTypeDesc {
         container: Some(ContainerKind::Graph),
-        can_hold_graph: false,
         ..desc("fw.graph", "Graph")
     }
 }
@@ -74,7 +73,6 @@ pub fn sink_type() -> NodeTypeDesc {
 pub fn group_type() -> NodeTypeDesc {
     NodeTypeDesc {
         container: Some(ContainerKind::Graph),
-        can_hold_graph: false,
         inputs: vec![PortDesc::new("image", "Image", PortType::Image)],
         outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
         ..desc("test.group", "Group")
@@ -84,7 +82,6 @@ pub fn group_type() -> NodeTypeDesc {
 pub fn timeline_type() -> NodeTypeDesc {
     NodeTypeDesc {
         container: Some(ContainerKind::Timeline),
-        can_hold_graph: false,
         outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
         ..desc("fw.timeline", "Timeline")
     }
@@ -97,8 +94,23 @@ pub fn clip_type() -> NodeTypeDesc {
             ParamDesc::media("file", "File"),
             ParamDesc::float("opacity", "Opacity", Unit::Percent, 100.0),
         ],
-        can_hold_graph: true,
-        ..desc("test.clip", "Clip")
+        container: Some(ContainerKind::Graph),
+        ..desc(CLIP_TYPE, "Clip")
+    }
+}
+
+/// What a clip's graph starts with.
+pub fn input_type() -> NodeTypeDesc {
+    NodeTypeDesc {
+        outputs: vec![PortDesc::new("image", "Image", PortType::Image)],
+        ..desc(INPUT_TYPE, "Input")
+    }
+}
+
+pub fn output_type() -> NodeTypeDesc {
+    NodeTypeDesc {
+        inputs: vec![PortDesc::new("image", "Image", PortType::Image)],
+        ..desc(OUTPUT_TYPE, "Output")
     }
 }
 
@@ -120,5 +132,7 @@ pub fn full_registry() -> Registry {
         group_type(),
         timeline_type(),
         clip_type(),
+        input_type(),
+        output_type(),
     ])
 }
