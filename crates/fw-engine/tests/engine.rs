@@ -241,9 +241,14 @@ fn plays_from_the_playhead_and_stops_at_the_end() {
         until(&mut engine, 10, |e| !e.is_playing()),
         "stopped by itself"
     );
+    let last = Time::of_frame(47, Time::from_seconds(24)).unwrap();
+    assert_eq!(engine.playhead(), last);
     assert_eq!(
-        engine.playhead(),
-        Time::of_frame(47, Time::from_seconds(24)).unwrap()
+        engine.take_events(),
+        [Event::Transport {
+            playing: false,
+            time: last
+        }]
     );
     assert!(engine.wait_for_frame(Duration::from_secs(20)));
     assert_eq!(engine.viewer_frame().unwrap().index, 47);

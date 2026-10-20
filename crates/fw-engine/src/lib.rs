@@ -477,7 +477,10 @@ impl Engine {
         if !self.is_playing() {
             return;
         }
-        let at = self.frame_start(self.playhead());
+        let mut at = self.frame_start(self.playhead());
+        if let Some(last) = self.last_frame() {
+            at = at.min(last);
+        }
         self.stop_sound();
         self.transport.hold(at);
         self.player.set_playing(false);
@@ -495,7 +498,6 @@ impl Engine {
             && self.playhead() >= last
         {
             self.pause();
-            self.transport.hold(last);
             return;
         }
         if self
