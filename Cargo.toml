@@ -17,6 +17,7 @@ fw-compile = { path = "crates/fw-compile" }
 fw-media = { path = "crates/fw-media" }
 fw-audio = { path = "crates/fw-audio" }
 fw-playback = { path = "crates/fw-playback" }
+fw-engine = { path = "crates/fw-engine" }
 fw-testmedia = { path = "crates/fw-testmedia" }
 fw-render = { path = "crates/fw-render" }
 
@@ -33,5 +34,11 @@ ulid = { version = "1", features = ["serde"] }
 naga = { version = "30", features = ["wgsl-in"] }
 # Development builds link the system FFmpeg (design §12); the private build replaces this later.
 rsmpeg = { version = "0.18", default-features = false, features = ["ffmpeg8", "link_system_ffmpeg"] }
-# Only fw-render may depend on wgpu. The UI toolkit choice decides the major version.
+# Only fw-render and fw-app may depend on wgpu; it follows egui-wgpu's major version.
 wgpu = "30"
+# The UI (fw-app): egui driven by hand on our own window and the engine's device.
+egui = "0.37"
+egui-winit = { version = "0.37", features = ["accesskit", "clipboard", "links", "wayland", "x11"] }
+egui-wgpu = { version = "0.37", features = ["winit"] }
+egui_tiles = "0.18"
+winit = "0.30.13"

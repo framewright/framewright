@@ -10,6 +10,9 @@ use wgpu::hal::api::Vulkan;
 use crate::RenderError;
 
 pub struct Gpu {
+    /// Kept so a UI can make window surfaces for the device.
+    pub instance: wgpu::Instance,
+    pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub info: wgpu::AdapterInfo,
@@ -38,6 +41,10 @@ const VIDEO_EXTENSIONS: [&CStr; 6] = [
     c"VK_KHR_synchronization2",
 ];
 
+fn backends() -> wgpu::Backends {
+    wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY)
+}
+
 impl Gpu {
     /// Creates a headless device. `FW_ADAPTER=<part of the name>` picks an
     /// adapter (e.g. `nvidia`, `llvmpipe`); otherwise the high-performance one.
@@ -46,15 +53,28 @@ impl Gpu {
     /// On Vulkan with a video decode queue, the device is also set up for
     /// hardware decoding into it (design §12), unless `FW_HARDWARE_DECODE=0`.
     pub fn new() -> Result<Gpu, RenderError> {
-        let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY);
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends,
+        Gpu::for_surface(Gpu::instance(), None)
+    }
+
+    /// The instance a UI makes its window surfaces from, before passing one
+    /// to [`Gpu::for_surface`].
+    pub fn instance() -> wgpu::Instance {
+        wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: backends(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
+        })
+    }
+
+    /// Like [`Gpu::new`], but only an adapter that can draw to `surface`
+    /// will do, when one is given.
+    pub fn for_surface(
+        instance: wgpu::Instance,
+        surface: Option<&wgpu::Surface<'_>>,
+    ) -> Result<Gpu, RenderError> {
         let adapter = match std::env::var("FW_ADAPTER") {
             Ok(want) => {
                 let want = want.to_lowercase();
-                pollster::block_on(instance.enumerate_adapters(backends))
+                pollster::block_on(instance.enumerate_adapters(backends()))
                     .into_iter()
                     .find(|a| a.get_info().name.to_lowercase().contains(&want))
                     .ok_or_else(|| {
@@ -64,18 +84,26 @@ impl Gpu {
             Err(_) => pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
-                compatible_surface: None,
+                compatible_surface: surface,
                 apply_limit_buckets: false,
             }))
             .map_err(|e| RenderError::NoAdapter(e.to_string()))?,
         };
+        if let Some(surface) = surface
+            && !adapter.is_surface_supported(surface)
+        {
+            return Err(RenderError::NoAdapter(format!(
+                "{} can't draw to this window",
+                adapter.get_info().name
+            )));
+        }
         let info = adapter.get_info();
         let limits = wgpu::Limits {
             max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.min(16384),
             ..wgpu::Limits::default()
         };
         let wanted = std::env::var("FW_HARDWARE_DECODE").map_or(true, |v| v != "0");
-        if wanted && let Some(gpu) = Gpu::with_video(&adapter, &limits)? {
+        if wanted && let Some(gpu) = Gpu::with_video(&instance, &adapter, &limits)? {
             return Ok(gpu);
         }
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -88,6 +116,8 @@ impl Gpu {
         }))
         .map_err(|e| RenderError::Gpu(e.to_string()))?;
         Ok(Gpu {
+            instance,
+            adapter,
             device,
             queue,
             info,
@@ -101,6 +131,7 @@ impl Gpu {
     /// for the decoder alone, and the synchronization2 and YCbCr features.
     /// `None` when the adapter can't decode video.
     fn with_video(
+        wgpu_instance: &wgpu::Instance,
         adapter: &wgpu::Adapter,
         limits: &wgpu::Limits,
     ) -> Result<Option<Gpu>, RenderError> {
@@ -207,6 +238,8 @@ impl Gpu {
         }
         .map_err(|e| RenderError::Gpu(e.to_string()))?;
         Ok(Some(Gpu {
+            instance: wgpu_instance.clone(),
+            adapter: adapter.clone(),
             device,
             queue,
             info: adapter.get_info(),

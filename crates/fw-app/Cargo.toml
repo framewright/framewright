@@ -1,0 +1,26 @@
+[package]
+name = "fw-app"
+description = "Framewright's UI: egui on our own window, a guest on the engine's GPU device"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "framewright"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+egui_tiles.workspace = true
+fw-core.workspace = true
+fw-doc.workspace = true
+fw-engine.workspace = true
+fw-plugin.workspace = true
+fw-render.workspace = true
+png = "0.18"
+pollster = "0.4"
+wgpu.workspace = true
+winit.workspace = true

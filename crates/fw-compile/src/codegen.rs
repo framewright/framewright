@@ -6,8 +6,7 @@ use fw_plugin::PixelOp;
 
 use crate::plan::KernelOp;
 
-/// Helpers every kernel can use. Out-of-range branches of `select` may compute
-/// NaN (e.g. `pow` of a negative), but `select` never returns them.
+/// Every kernel's bindings, and its parameter helpers.
 const PRELUDE: &str = r#"
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var dst: texture_storage_2d<rgba16float, write>;
@@ -24,6 +23,11 @@ fn fw_mat3(base: u32) -> mat3x3<f32> {
         vec3<f32>(prm(base, 6u), prm(base, 7u), prm(base, 8u)),
     );
 }
+"#;
+
+/// Colour helpers every kernel can use. Out-of-range branches of `select` may
+/// compute NaN (e.g. `pow` of a negative), but `select` never returns them.
+const HELPERS: &str = r#"
 
 fn fw_unpremultiply(c: vec4<f32>) -> vec4<f32> {
     if (c.a > 0.0) {
@@ -115,11 +119,41 @@ pub fn conversion(from: ColorSpace, to: ColorSpace) -> Option<PixelOp> {
     })
 }
 
-/// A compute shader running `ops` in order on every pixel.
+/// WGSL for shaders outside plans, such as the viewer's: the colour helpers
+/// and `fn <name>(c: vec4<f32>) -> vec4<f32>`, converting premultiplied
+/// pixels from `from` to `to`.
+pub fn conversion_function(name: &str, from: ColorSpace, to: ColorSpace) -> String {
+    let body = match conversion(from, to) {
+        None => "return c;".to_owned(),
+        Some(op) => {
+            // The matrix inline, rather than read from a parameter buffer.
+            let columns: Vec<String> = op
+                .params
+                .chunks(3)
+                .map(|c| format!("vec3<f32>({:?}, {:?}, {:?})", c[0], c[1], c[2]))
+                .collect();
+            op.wgsl.replace(
+                "fw_mat3(base)",
+                &format!("mat3x3<f32>({})", columns.join(", ")),
+            )
+        }
+    };
+    let mut out = String::from(HELPERS);
+    out.push_str(&format!("\nfn {name}(c: vec4<f32>) -> vec4<f32> {{\n"));
+    for line in body.lines() {
+        out.push_str("    ");
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str("}\n");
+    out
+}
+
 /// A compute shader running `ops` in order on every pixel. Extra inputs are
 /// bound from binding 3 onwards, in `extra_inputs` order.
 pub fn kernel(ops: &[KernelOp], extra_inputs: usize) -> String {
     let mut out = String::from(PRELUDE);
+    out.push_str(HELPERS);
     for k in 0..extra_inputs {
         out.push_str(&format!(
             "@group(0) @binding({}) var ex{k}: texture_2d<f32>;\n",

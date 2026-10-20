@@ -1,7 +1,7 @@
 //! Playback, with a clock the test controls.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use fw_audio::FakeClock;
@@ -105,4 +105,96 @@ fn renders_ahead_of_the_playhead() {
         "frames 0–4 render without being shown"
     );
     assert!(rendered.load(Ordering::Relaxed) >= 5);
+}
+
+/// Frames whose pixel holds the document version they were rendered from.
+struct Versioned {
+    version: Arc<AtomicU64>,
+    rendered: Arc<Mutex<Vec<i64>>>,
+}
+
+impl FrameSource for Versioned {
+    type Frame = Arc<RgbaImage>;
+
+    fn frame(&mut self, index: i64) -> Result<Arc<RgbaImage>, String> {
+        self.rendered.lock().unwrap().push(index);
+        let mut img = RgbaImage::new(1, 1, true);
+        let version = self.version.load(Ordering::Relaxed) as f32;
+        img.set_pixel(0, 0, [index as f32, version, 0.0, 1.0]);
+        Ok(Arc::new(img))
+    }
+}
+
+type Rendered = Arc<Mutex<Vec<i64>>>;
+
+fn versioned() -> (
+    Player<Arc<RgbaImage>>,
+    Arc<FakeClock>,
+    Arc<AtomicU64>,
+    Rendered,
+) {
+    let clock = Arc::new(FakeClock::new(Time::ZERO));
+    let version = Arc::new(AtomicU64::new(0));
+    let rendered = Rendered::default();
+    let source = Versioned {
+        version: version.clone(),
+        rendered: rendered.clone(),
+    };
+    let player = Player::new(Box::new(source), clock.clone(), t("24"), 4);
+    (player, clock, version, rendered)
+}
+
+/// Ticks until a frame is shown, or gives up after two seconds.
+fn next_shown(
+    player: &mut Player<Arc<RgbaImage>>,
+) -> Option<fw_playback::Presented<Arc<RgbaImage>>> {
+    for _ in 0..400 {
+        if let Some(shown) = player.tick() {
+            return Some(shown);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    None
+}
+
+#[test]
+fn an_edit_replaces_the_frame_on_screen() {
+    let (mut player, _clock, version, _) = versioned();
+    player.set_playing(false);
+    let first = next_shown(&mut player).expect("frame 0");
+    assert_eq!(first.image.pixel(0, 0)[1], 0.0);
+    assert!(player.up_to_date());
+
+    version.store(1, Ordering::Relaxed);
+    player.invalidate();
+    assert!(
+        !player.up_to_date(),
+        "the frame on screen is from before the edit"
+    );
+    assert_eq!(
+        player.shown().unwrap().index,
+        0,
+        "it stays until its replacement is ready"
+    );
+    let second = next_shown(&mut player).expect("frame 0 again");
+    assert_eq!(second.index, 0);
+    assert_eq!(second.image.pixel(0, 0)[1], 1.0);
+    assert!(player.up_to_date());
+}
+
+#[test]
+fn paused_renders_only_the_frame_due() {
+    let (mut player, clock, _, rendered) = versioned();
+    player.set_playing(false);
+    for i in [10i64, 40, 20] {
+        clock.set(Time::of_frame(i, t("24")).unwrap());
+        let shown = next_shown(&mut player).expect("the frame landed on");
+        assert_eq!(shown.index, i);
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    let mut rendered = rendered.lock().unwrap().clone();
+    // Frame 0 may render before the clock first moves.
+    rendered.retain(|i| *i != 0);
+    assert_eq!(rendered, [10, 40, 20], "nothing rendered ahead");
+    assert_eq!(player.stats().dropped, 0, "jumps while paused aren't drops");
 }

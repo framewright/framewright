@@ -22,6 +22,7 @@ use fw_doc::Document;
 use fw_plugin::{MediaRef, Quality, Registry};
 
 pub use audio::{AudioPlan, Voice, compile_audio};
+pub use codegen::conversion_function;
 pub use frames::FrameTimes;
 pub use hardware::{Acquired, Decoded, HardwareFrame, HardwarePicture, VulkanVideoDevice};
 pub use plan::{FillStep, KernelOp, KernelStep, LoadStep, Origin, Plan, Step};

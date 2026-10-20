@@ -5,7 +5,7 @@ Living document. Started 2026-10-19.
 Every item is tagged:
 
 - **[Decided]**: agreed; change only with a deliberate revisit.
-- **[Decided]**: recommended and not objected to, but not explicitly confirmed.
+- **[Proposed]**: recommended and not objected to, but not explicitly confirmed.
 - **[Open]**: needs a decision.
 
 UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
@@ -188,6 +188,8 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** There is **one** engine. There is no full duplicate CPU reference implementation of every effect; correctness comes from golden-image tests.
 - **[Decided]** (from the optimisation pass) **Showing a frame never reads it back.** `Renderer::render_gpu` leaves the frame in a GPU texture and returns once the work is queued. Playback holds these textures; its `FrameSource` is generic over the frame type, so its tests still use small CPU images. `Renderer::render` reads back, for `fw render`, export and tests. Budgets that time a frame wait until the GPU has finished it.
 
+- **[Proposed]** (step 3 plan) **The frame cache, the GPU-memory tier.** `Renderer::render_gpu` keeps finished frames in GPU memory by their plan's output key, within a budget (2 GiB by default). An edit changes the keys of exactly the frames it affects, so nothing is invalidated explicitly and untouched frames show at once. Frames playback rendered ahead are dropped after an edit, and the timeline shows which frames are cached.
+
 ## 8. Audio
 
 - **[Decided]** Audio is in scope: moderate work now, with room for more later. There is an Audio workspace.
@@ -214,6 +216,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** A versioned, diffable, readable file format with schema versions per node type and legacy readers.
   - Unknown or future node types round-trip byte-exactly, and edits that would destroy them are refused.
   - Node payloads are structured data, never JSON stored as bytes.
+- **[Proposed]** (step 3 plan) **A continuous gesture is one undo step.** An edit can carry a gesture id, and consecutive edits with the same id merge into one step, so dragging a slider is undone in one go. The merging lives in `fw-doc`'s `Editor`, not the UI.
 - **[Decided]** Atomic saves (write a temp file, fsync, rename, fsync the directory), rolling backups, and tests that interrupt a save at each step.
 - **[Decided]** **Project documents are pretty-printed JSON** with stable key order and tagged enums. Unknown nodes are held byte-exactly via `serde_json::RawValue`. Large binary data (paint strokes, caches, thumbnails) lives in sidecar files referenced by content hash, never embedded; optional zstd compression may come later. **Hand-written files** (plugin manifests, app config) are TOML. The format sits behind one module.
 - **[Decided]** (from step 1) **File layout details:**
@@ -229,6 +232,9 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Deterministic UI launch modes (open the app in a fixed state for screenshots), useful for design iteration and visual tests.
 - **[Decided]** **UI toolkit: egui**, chosen after the bake-off (`spikes/bakeoff-report.md`) and by using both. We drive `egui`, `egui-winit` and `egui-wgpu` ourselves on our own window and the engine's device; eframe always picks an 8-bit surface, so it is not used. Docking uses `egui_tiles`. Our design-system layer sits on top. The engine's wgpu version follows egui-wgpu's (30 today). Heavy engine work is submitted in slices, the only way to keep 60 fps with zero-copy display on a single queue.
 - **[Decided]** **A custom title bar:** no system decorations. The top bar holds the logo, menus, project name, Export, and minimise, maximise and close. The window moves and resizes through the compositor (winit `drag_window` / `drag_resize_window`), so snapping still works. We draw our own resize borders and cursors.
+- **[Proposed]** (step 3 plan) **`fw-app` layout:** one main window driven by hand (winit, egui, egui-winit, egui-wgpu). Pages come from the document kind: for timelines the Edit page is built now, and the other workspaces are listed but disabled until they exist. A graph document gets a viewer, the inspector and a plain node list until the node editor exists. IBM Plex (SIL OFL) is embedded in the binary. `fw-app` depends on wgpu, because egui-wgpu draws on the engine's device; it and `fw-render` are the only crates that do.
+- **[Proposed]** (step 3 plan) **The deterministic launch mode:** `fw-app <project> --screenshot <png>` opens the project in a fixed state, renders until the viewer's frame is ready, saves the window and exits.
+- **[Proposed]** (step 3 plan) **The viewer is the display boundary.** It draws the engine's frame with its own shader inside the UI's pass, with no copy: from the frame's colour space to linear Rec.709, over the viewer background, then encoded for the swapchain (the sRGB curve on the default 10-bit `Rgb10a2Unorm` surface). A real display and view transform replaces that last step later. Exports never pass through it.
 
 ### 10.1 Process model
 
@@ -238,6 +244,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** **Render queue jobs run in headless worker processes** (`fw render`), so a crashing render never takes the UI down and renders can outlive the UI.
 - **[Decided]** **A command journal on disk** provides crash recovery: replay it after a crash and nothing is lost.
 - **[Decided]** **Rendering on another machine is not a requirement.** The door stays open, because the API is the boundary: a headless `fw serve` mode could be added later for remote or farm rendering.
+- **[Proposed]** (step 3 plan) **`fw-engine`: the engine as one object.** A project open for editing, with its undo history, media, rendering and playback. Clients drive it with serialisable requests (edit, undo, redo, seek, play, pause, save) and get serialisable events back. Calls are synchronous and quick; heavy work (rendering, decoding, editing copies) runs on the engine's own threads. The one exchange that isn't a message is the viewer's frame, a GPU texture handed over in-process, because showing it must not copy. `fw-script` will later serve the same requests over a socket, and `fw play` moves onto it.
 
 ## 11. Extensibility
 
@@ -340,6 +347,7 @@ fw-audio     real-time audio engine, streaming, master clock, device output
 fw-playback  frames chosen by the master clock, rendered ahead
 fw-ops       built-in nodes, registered via fw-plugin
 fw-script    command protocol server, expression language
+fw-engine    a project open for editing: requests in, events out (Proposed, step 3)
 fw-cli       headless render/inspect/play
 fw-app       UI
 

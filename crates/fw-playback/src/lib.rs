@@ -7,6 +7,7 @@
 //!   already too late for (stale requests are dropped, not queued).
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -78,6 +79,11 @@ pub struct PlaybackStats {
 struct Shared<F> {
     ready: Mutex<BTreeMap<i64, Result<F, String>>>,
     rendered: Condvar,
+    /// Bumped when frames rendered so far go stale; a render that started
+    /// before the bump is thrown away.
+    generation: AtomicU64,
+    /// While paused only the frame due is rendered.
+    playing: AtomicBool,
 }
 
 pub struct Player<F> {
@@ -88,6 +94,11 @@ pub struct Player<F> {
     wanted: Sender<i64>,
     thread: Option<JoinHandle<()>>,
     shown: Option<Presented<F>>,
+    /// The frame shown was rendered before [`Player::invalidate`].
+    stale: bool,
+    /// The frame due that failed to render, and why. The last frame that
+    /// rendered stays on screen.
+    failed: Option<(i64, String)>,
     stats: PlaybackStats,
 }
 
@@ -102,6 +113,8 @@ impl<F: Clone + Send + 'static> Player<F> {
         let shared = Arc::new(Shared {
             ready: Mutex::new(BTreeMap::new()),
             rendered: Condvar::new(),
+            generation: AtomicU64::new(0),
+            playing: AtomicBool::new(true),
         });
         let (wanted, requests) = mpsc::channel();
         let thread_shared = shared.clone();
@@ -117,12 +130,53 @@ impl<F: Clone + Send + 'static> Player<F> {
             wanted,
             thread: Some(thread),
             shown: None,
+            stale: false,
+            failed: None,
             stats: PlaybackStats::default(),
         }
     }
 
     pub fn stats(&self) -> &PlaybackStats {
         &self.stats
+    }
+
+    /// Throws away every frame rendered so far, because what they show has
+    /// changed. The frame on screen stays until its replacement is ready.
+    pub fn invalidate(&mut self) {
+        self.shared.generation.fetch_add(1, Ordering::AcqRel);
+        self.shared
+            .ready
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.stale = self.shown.is_some();
+        self.failed = None;
+    }
+
+    /// Playing (the default) renders ahead and counts dropped frames. Paused,
+    /// only the frame due is rendered, so moving the clock by hand (scrubbing)
+    /// renders just the frames landed on.
+    pub fn set_playing(&mut self, playing: bool) {
+        self.shared.playing.store(playing, Ordering::Release);
+    }
+
+    /// Whether the frame on screen is the one due, rendered from what's
+    /// current.
+    pub fn up_to_date(&self) -> bool {
+        let due = Some(self.due());
+        self.failed.as_ref().map(|f| f.0) == due
+            || !self.stale && self.shown.as_ref().map(|s| s.index) == due
+    }
+
+    /// Why the frame due failed to render, if it did.
+    pub fn failure(&self) -> Option<&str> {
+        let (index, message) = self.failed.as_ref()?;
+        (*index == self.due()).then_some(message.as_str())
+    }
+
+    /// The frame on screen.
+    pub fn shown(&self) -> Option<&Presented<F>> {
+        self.shown.as_ref()
     }
 
     /// The frame the clock says is due now.
@@ -139,14 +193,17 @@ impl<F: Clone + Send + 'static> Player<F> {
         // Frames well behind the playhead won't be shown again soon.
         ready.retain(|i, _| *i >= due - 1 && *i <= due + self.ahead * 2);
         let last = self.shown.as_ref().map(|s| s.index);
-        if last == Some(due) {
+        if last == Some(due) && !self.stale {
             return None;
         }
         let image = match ready.get(&due) {
             Some(Ok(image)) => image.clone(),
-            Some(Err(_)) => {
-                ready.remove(&due);
-                self.stats.errors += 1;
+            Some(Err(message)) => {
+                // Kept in `ready`, so it isn't rendered again until an edit.
+                if self.failed.as_ref().map(|f| f.0) != Some(due) {
+                    self.failed = Some((due, message.clone()));
+                    self.stats.errors += 1;
+                }
                 return None;
             }
             // Not ready: hold the last frame; the miss is counted once it's shown past.
@@ -155,9 +212,12 @@ impl<F: Clone + Send + 'static> Player<F> {
         drop(ready);
         if let Some(last) = last
             && due > last
+            && self.shared.playing.load(Ordering::Acquire)
         {
             self.stats.dropped += (due - last - 1) as u64;
         }
+        self.stale = false;
+        self.failed = None;
         self.stats.shown += 1;
         let presented = Presented {
             index: due,
@@ -217,12 +277,20 @@ fn render_ahead<F: Clone + Send + 'static>(
             due = i;
         }
         // Frames that will pass while one renders, with a quarter to spare.
-        let lead = (render_seconds * rate.as_f64() * 1.25).round() as i64;
+        let (lead, ahead) = if shared.playing.load(Ordering::Acquire) {
+            (
+                (render_seconds * rate.as_f64() * 1.25).round() as i64,
+                ahead,
+            )
+        } else {
+            (0, 0)
+        };
         let next = {
             let ready = shared.ready.lock().unwrap_or_else(|e| e.into_inner());
             (due + lead..=due + lead + ahead).find(|i| !ready.contains_key(i))
         };
         let Some(index) = next else { continue };
+        let generation = shared.generation.load(Ordering::Acquire);
         let started = std::time::Instant::now();
         let result = source.frame(index);
         let took = started.elapsed().as_secs_f64();
@@ -231,11 +299,12 @@ fn render_ahead<F: Clone + Send + 'static>(
         } else {
             render_seconds * 0.8 + took * 0.2
         };
-        shared
-            .ready
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(index, result);
+        let mut ready = shared.ready.lock().unwrap_or_else(|e| e.into_inner());
+        // Checked under the lock `invalidate` clears under.
+        if shared.generation.load(Ordering::Acquire) == generation {
+            ready.insert(index, result);
+        }
+        drop(ready);
         shared.rendered.notify_all();
     }
 }

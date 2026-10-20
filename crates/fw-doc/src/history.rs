@@ -33,6 +33,8 @@ pub enum Cause {
 #[derive(Debug, Clone)]
 struct Step {
     label: String,
+    /// Later edits in the same gesture join this step.
+    gesture: Option<u64>,
     forward: Vec<Command>,
     /// Applied in order to undo the step.
     inverse: Vec<Command>,
@@ -85,14 +87,35 @@ impl Editor {
         label: impl Into<String>,
         commands: Vec<Command>,
     ) -> Result<Event, CommandError> {
+        self.apply_in_gesture(label, commands, None)
+    }
+
+    /// Like [`Editor::apply`], but edits that carry the same `gesture`, one
+    /// straight after another, make one undoable step: a slider drag sends
+    /// many, and is undone in one go. The step keeps its first label.
+    pub fn apply_in_gesture(
+        &mut self,
+        label: impl Into<String>,
+        commands: Vec<Command>,
+        gesture: Option<u64>,
+    ) -> Result<Event, CommandError> {
         let label = label.into();
-        let inverse = self.run(&commands)?;
+        let mut inverse = self.run(&commands)?;
         let nodes = touched(&commands);
-        self.undo.push(Step {
-            label: label.clone(),
-            forward: commands,
-            inverse,
-        });
+        match self.undo.last_mut() {
+            Some(step) if gesture.is_some() && step.gesture == gesture && self.redo.is_empty() => {
+                step.forward.extend(commands);
+                // Undo this edit first, then the ones before it.
+                inverse.append(&mut step.inverse);
+                step.inverse = inverse;
+            }
+            _ => self.undo.push(Step {
+                label: label.clone(),
+                gesture,
+                forward: commands,
+                inverse,
+            }),
+        }
         self.redo.clear();
         Ok(self.changed(Cause::Edit { label }, nodes))
     }
@@ -125,7 +148,12 @@ impl Editor {
             Ok(inverse) => {
                 let nodes = touched(&step.forward);
                 let label = step.label.clone();
-                self.undo.push(Step { inverse, ..step });
+                // A redone step never merges with later edits.
+                self.undo.push(Step {
+                    inverse,
+                    gesture: None,
+                    ..step
+                });
                 Ok(Some(self.changed(Cause::Redo { label }, nodes)))
             }
             Err(e) => {

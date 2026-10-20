@@ -9,6 +9,7 @@
 //! CPU never touches its pixels.
 
 mod cache;
+mod display;
 mod gpu;
 mod unpack;
 
@@ -26,6 +27,7 @@ use half::f16;
 use half::slice::HalfFloatSliceExt;
 
 pub use cache::{Cached, DEFAULT_GPU_CACHE_BYTES, RamCache};
+pub use display::{Display, DisplayView, SurfaceEncoding};
 pub use gpu::Gpu;
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;

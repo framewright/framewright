@@ -381,3 +381,69 @@ fn connections_are_checked() {
         Err(CommandError::Root)
     );
 }
+
+#[test]
+fn a_gesture_is_one_undo_step() {
+    let registry = Arc::new(full_registry());
+    let mut ids = SequentialIds::new(4);
+    let root = ids.next_id();
+    let gain = ids.next_id();
+    let mut editor = Editor::new(Document::new(root), registry);
+    editor
+        .apply(
+            "Add Gain",
+            vec![Command::AddNode {
+                parent: root,
+                id: gain,
+                type_id: "test.gain".into(),
+                name: None,
+                placement: None,
+            }],
+        )
+        .unwrap();
+    let set = |value: f64| {
+        vec![Command::SetParam {
+            node: gain,
+            param: "gain".into(),
+            value: Some(Param::Constant(ParamValue::Float(value))),
+        }]
+    };
+    editor.apply("Set Gain", set(0.5)).unwrap();
+    let before_drag = editor.doc().clone();
+
+    // A drag: many values in one gesture.
+    for i in 1..=20 {
+        editor
+            .apply_in_gesture("Drag Gain", set(i as f64 / 10.0), Some(7))
+            .unwrap();
+    }
+    let after_drag = editor.doc().clone();
+    assert_eq!(editor.undo_label(), Some("Drag Gain"));
+    editor.undo().unwrap();
+    assert_eq!(
+        editor.doc(),
+        &before_drag,
+        "one undo takes back the whole drag"
+    );
+    assert_eq!(editor.undo_label(), Some("Set Gain"));
+    editor.redo().unwrap();
+    assert_eq!(editor.doc(), &after_drag);
+
+    // A redone gesture doesn't swallow a new one with the same id, and
+    // another gesture or a plain edit starts a new step.
+    editor
+        .apply_in_gesture("Drag Gain", set(0.1), Some(7))
+        .unwrap();
+    editor
+        .apply_in_gesture("Drag Gain", set(0.2), Some(8))
+        .unwrap();
+    editor.apply("Set Gain", set(0.3)).unwrap();
+    for expected in [0.2, 0.1, 2.0] {
+        editor.undo().unwrap();
+        let node = editor.doc().node(gain).unwrap().as_known().unwrap();
+        assert_eq!(
+            node.params.get("gain"),
+            Some(&Param::Constant(ParamValue::Float(expected)))
+        );
+    }
+}
