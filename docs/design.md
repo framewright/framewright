@@ -50,6 +50,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 
 - **[Decided]** Compose (the node view) is available in every kind, because it's "the graph of whatever you're in".
 - **[Decided]** Container kinds declare the workspaces they support. Plugins can add new container kinds and their workspaces.
+- **[Proposed]** (step 5a plan) **Projects and media from the app.** File › New Timeline makes a project from a size and frame rate (1920×1080 at 24 fps by default), File › Open and File › Save As use the desktop's file dialogs (`rfd`, through the XDG portal), and the window title shows the project. The project keeps a **media pool**: files imported but not yet used are saved in the file as a top-level `"media"` list of paths relative to the project, changed by `Command::AddMedia` and `RemoveMedia`, so importing is undoable. The Media panel lists the pool together with every file the document uses, with a thumbnail of each (a small frame from a third of the way in, decoded in the background and kept in memory). Files come in through **Import** in the Media panel or File menu, or by dropping them on the window. TODO: content fingerprints and relinking (§4.3), bins, and thumbnails cached on disk.
 
 ### 3.2 Editing across kinds by nesting
 
@@ -121,6 +122,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** **Optional extra channels** (depth, motion, IDs, normals), allocated only when something produces them.
 - **[Decided]** **Value ports and parameter linking** (tracker to transform, audio level to parameter). Links are graph edges, so they get the same caching and invalidation as everything else.
 - **[Decided]** **Resolution-independent units.** Positions are in canvas units, never pixels; times are rational time, never frame numbers.
+- **[Proposed]** (step 5a plan) **A clip's transform.** Clips gain a **Transform** section: Position (a vec2 in canvas units, `[0, 0]` centered), Scale (percent), Rotation (degrees), and Fit (`fit`, the default, scales the media to fit inside the frame; `fill` covers it; `stretch` fills it exactly; `none` keeps the media's pixels at their size). All are animatable except Fit, so a photo can drift and zoom. The new parameters have defaults, so files saved before keep working and the clip keeps version 1. This removes the "media can't be placed on this timeline yet" error.
 - **[Decided]** **Parameter kinds:**
   - scalars with units (px, degrees, seconds, dB, EV, ratio), int, bool, choice
   - vectors; colors (with color space, HDR values allowed)
@@ -150,6 +152,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   3. **Execute:** in slices, pipelined across frames during playback.
 - **[Decided]** **The plan is a render graph with known resource lifetimes.** Transient textures are pooled and aliased.
 - **[Decided]** **Automatic fusion of per-pixel operations** into generated shaders. Operations that read neighboring pixels stay as separate passes.
+- **[Proposed]** (step 5a plan) **Warping, the first operation that reads other pixels.** `PlanBuilder::transform(image, affine, region)` maps an image through a 2D affine transform onto a region, as its own pass. It samples premultiplied pixels bilinearly from a mip chain of the input, so a 24-megapixel photo scaled down to 1080p averages its pixels rather than skipping them. The renderer builds mip levels only for inputs a warp shrinks. The transform and region are part of the key. TODO: bicubic and Lanczos filters, motion blur, and taking the warp into account when a node asks for a region.
 - **[Decided]** **Adaptive tiling and a power-of-two scale pyramid.** Normal frames render whole. Big stills and zoomed views render visible tiles only, with the margin each filter needs taken from its requirements.
 - **[Decided]** **Sliced GPU submission** of a few milliseconds each, so heavy engine work never freezes the UI.
 - **[Decided]** **The playback pipeline:** a decode thread pool feeding GPU uploads through ring buffers; read-ahead in the play direction and speed; rendering several frames ahead; the audio clock selecting the displayed frame; dropped frames shown with a visible indicator rather than stalling; optional background rendering of heavy sections into the disk cache.
@@ -163,6 +166,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 - **[Decided]** Time resolves exactly to **frames and to audio samples**.
 - **[Decided]** Each placement has three clocks: position in the parent, animation time, and source time.
 - **[Decided]** Keyframes are anchored to a clip's start, end or a percentage of its length, so trimming and retiming behave predictably.
+- **[Proposed]** (step 5a plan) **Keyframes in the inspector.** Each animatable row's diamond adds a key at the playhead, removes the key there, or (when the parameter is animated) shows whether the playhead is on one. Changing an animated value sets a key at the playhead. Arrows beside the diamond step the playhead to the previous or next key. Keys are written with `SetParam` and the whole keyframe list, built by helpers in `fw-doc`, so no new command is needed. A new interpolation, **Ease**, eases in and out (smoothstep), and keys added from the inspector use it so moves start and stop gently. Clips on the timeline show their keys as small marks. TODO: a keyframe lane or curve editor, bezier handles, and choosing a key's interpolation from the inspector.
 - **[Decided]** Variable frame rate is kept as a fact about the source: exact per-frame timestamps, and footage is never rewritten to a constant rate.
 - **[Decided]** (from step 2) **Timeline details:**
   - Tracks are ordered bottom to top and composite like every NLE: each active clip goes over the tracks below it using its alpha, its Opacity and its Composite mode (Normal and Add for now; more modes later), in scene-linear light. A gap is transparent black.
@@ -170,6 +174,15 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - A clip's placement (track, start, duration, source in point, speed) lives in the timeline and is saved next to the clip's node. Clips on one track never overlap; edits that would overlap are refused.
   - A key's time is measured from the clip's start (the default), its end, or a fraction of its length. Outside a clip only start anchors are valid.
   - Video frames are chosen by source time, and the chosen frame's timestamp is part of the load's cache key. A still clip therefore keys the same for its whole length.
+- **[Proposed]** (step 5a plan) **Cutting on the timeline.** Each edit is ordinary commands, so it undoes in one step:
+  - **Adding:** dragging media from the Media panel onto a video track adds a clip of its picture, and onto an audio track a clip of its sound. A video lasts its media's length and a still lasts 5 seconds. The clip lands at the drop point, or at the next free place on that track if it would overlap.
+  - **Trimming:** dragging a clip's left or right edge changes its start or end, moving `source_in` with the left edge so the picture stays put. A video can't be trimmed past its media, and no clip past its neighbors. A still can be any length.
+  - **Splitting** (B, or Timeline › Split at Playhead): the selected clip, or every clip under the playhead when none is, becomes two clips at the playhead. A new `Command::DuplicateNode { id, new_id, placement }` copies a clip with its graph; the copy's nested ids are derived from `new_id`, so replaying a journal gives the same document. Keyframes are rewritten into each half so every frame looks the same as before the split.
+  - **Ripple delete** (Shift+Delete): removes the clip and moves everything after it on that track earlier by its length.
+  - **Snapping:** moving and trimming snap to clip edges and the playhead within 8 points, and S or the toolbar turns snapping off. Without snapping, times still land on whole frames.
+  - **Tracks:** Timeline › Add Video Track and Add Audio Track, and removing an empty track from its header.
+  - TODO: linked picture and sound clips that move together, slip and slide, ripple trimming, a trim tool.
+- **[Proposed]** (step 5a plan) **Transitions.** A clip's placement can carry a transition in (`transition_in`) and a transition out (`transition_out`), each with a duration; the only kind is a dissolve. A transition in on a clip whose start touches the previous clip on its track is a **cross-dissolve** centered on the cut: for half its duration each side, both clips render, the earlier one past its end and the later one before its start, mixed by how far through it is. Without a touching neighbor, a transition is a **fade** from or to transparent, which over an empty track below is black. A dissolve needs media for its overlap, so a video clip without enough beyond its in or out point is refused, as an overlap is. A transition out is allowed only where no clip follows touching, so each cut has one owner. TODO: audio crossfades, wipes and other kinds, transitions as plugins.
 
 ## 6. Color
 
@@ -209,6 +222,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - The master clock counts samples written, minus the device's reported latency, interpolated between blocks (capped at 50 ms so a stalled device stalls the picture rather than letting it drift).
   - Resampling uses FFmpeg's swresample inside `fw-media`, rather than `rubato`, because FFmpeg already decodes the audio.
   - Parameters are constant per clip for now. TODO: automation resolved per block.
+- **[Proposed]** (step 5a plan) **Mixing down for export.** `fw-audio` gains an offline mix: the same voices and processors as playback, pulled block by block from `AudioReader`s instead of real-time rings, so it never underruns and gives the same samples every time.
 - **[Decided]** (from step 2) **Playback details:** the frame shown is always the one the clock says is due. A render thread renders ahead, aiming as far ahead as a frame takes to render (with 25% to spare). A missed frame holds the last one and is counted as dropped. Playback starts once the first frame is ready.
 
 ## 9. Document, persistence and undo
@@ -243,6 +257,8 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - Dragging from a port to a port connects them (`Command::Connect`, replacing the input's source). Dragging a connection off its input disconnects it. A drop the document would refuse (a loop, or different kinds of data) is shown as refused while dragging, with the reason.
   - Clicking selects a node for the inspector, and Shift-click adds a node to the selection or takes it out. Delete removes the selected nodes. Dragging moves them, one undo step per drag.
   - Nodes are added from a searchable list of the registry's types grouped by category, opened with Tab or a right-click. The new node lands where the list was opened.
+- **[Proposed]** (step 5a plan) **The Edit page edits.** Following the Studio mockup: a toolbar above the tracks with Select, Blade and Snapping; trim handles on clip edges with a trim cursor; a drop indicator while dragging media in; the clip context menu adds Split at Playhead, Ripple Delete, Delete and Add Dissolve; the Clip and Timeline menus carry the same commands and their shortcuts. Transition handles sit on clip corners, and dragging one sets the duration.
+- **[Proposed]** (step 5a plan) **Exporting from the Deliver page.** Deliver shows presets on the left (H.264 1080p, H.265, ProRes 422 HQ), the render settings in groups (Source: the timeline, whole or between in and out marks; Format: container, codec and encoder; Video: size and frame rate, from the timeline, and quality; Audio: AAC or PCM; File: name and folder), a preview of the output, **Add to Render Queue**, and the render queue with each job's progress, time left, and a way to cancel. The engine runs one job at a time on its own thread with `Request::Export` and `Request::CancelExport`, reporting `Event::ExportProgress`. `fw export <project> --preset <name> --out <file>` uses the same code, for batch renders. TODO: image sequences, HDR, and presets of your own.
 - **[Decided]** (from step 4) **Node positions are saved in the document.** They live in the Graph's contents (`"positions": {"<node id>": [x, y]}`, in editor units) and change through `Command::SetPosition`, so moving nodes is undoable and travels with the file. A node with no saved position is placed by the editor (in columns by depth) until it is moved. The compiler never reads positions, so moving a node changes no cache key.
 - **[Decided]** (from step 4) **The inspector edits every numeric kind a plugin can declare:** numbers with sliders, whole numbers, checkboxes, choices, vec2 as an x and a y field, and colors with a picker. One drag or one visit to a field is one undo step. TODO: a color picker in the Studio style that keeps values above 1.0 and shows which color space they're in (egui's picker reads them as linear, which is what plugin color defaults are).
 
@@ -289,6 +305,7 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
 
 - **[Decided]** FFmpeg, as a private, pinned, checksummed LGPL build. The app never uses system FFmpeg. Patent-encumbered components are loaded at runtime. FFmpeg is hidden behind our own media interface and nothing else touches it.
 - **[Decided]** (from step 2) **During development only,** `fw-media` links the system FFmpeg libraries, behind the same interface. The private pinned build becomes its own task, done before anything is distributed.
+- **[Proposed]** (step 5a plan) **Encoding.** `fw-media` gains a writer for MP4 and MOV: H.264 and H.265 through libx264 and libx265 by default (or NVENC and VA-API when chosen), ProRes 422 HQ through `prores_ks`, AAC or PCM audio, muxed together. A frame is rendered at final quality in the delivery space, Rec.709 with the BT.1886 curve for these formats, then converted to Y′CbCr 4:2:0 (4:2:2 10-bit for ProRes) by a GPU kernel with exact Rec.709 constants, so only the planes are read back. The file's color tags come from the same delivery spec as the pixels (§6).
 - **[Decided]** (from step 2) **Video decoding details:**
   - The FFmpeg binding is `rsmpeg`. It links the system FFmpeg now and can link the private build later through environment variables, so no rewrite.
   - Source time 0 is a video's first frame, whatever the container's own start time.
@@ -385,7 +402,11 @@ fw-bench     benchmark harness and performance budgets
 2. Time: a video source and the Timeline container, compiled to the flat graph, plus audio playback with A/V sync.
 3. The UI shell in the Studio style (after the toolkit bake-off): viewer, parameter editing, undo, frame cache.
 4. Shader-node plugins, to prove early that built-ins use the plugin API. Built, with the node editor and Open in Compose.
-5. Then widen: LayerStack and Photo documents, masks, text, mixer, 3D.
+5. Then widen, starting with (5a, Proposed) a montage you can cut and export, in three milestones with a check-in after each:
+   1. Projects and media in, and cutting: New, Open and Save As; importing into the media pool with thumbnails; dragging media onto tracks; trimming, splitting, ripple delete, snapping, adding tracks.
+   2. A clip's transform and keyframes: Position, Scale, Rotation and Fit, the warp operation, and keyframing from the inspector.
+   3. Dissolves and export: cross-dissolves and fades, the encoder, the offline mix, the Deliver page with its render queue, and `fw export`.
+   After 5a: LayerStack and Photo documents, masks, text, mixer, 3D.
 
 **[Decided]** (from the hardware decoding discussion) Before step 3: editing copies and hardware decoding, so scrubbing feels right from the first UI build.
 
