@@ -275,10 +275,26 @@ UI mockups (Studio direction): https://claude.ai/artifact/Rm9UTcSdBYVVyXRSQY7GWb
   - The conversion is its own dispatch rather than fused into the plan's first kernel: the picture describes itself when decoded, so the plan never needs to know pixel formats, and the extra pass costs about 0.1 ms at 1080p. Fusing stays possible.
   - The RAM cache holds decoded planes: 3 MB for a 1080p 4:2:0 8-bit frame, against 33 MB as `f32` RGBA.
 - **[Proposed]** (from the optimisation pass) **Decoding speed:** FFmpeg decodes with frame and slice threads, as many as there are cores. The probe records keyframes, and a reader seeks when landing on a keyframe beats decoding forward (a seek counts as 0.25 s of decoding). Each clip keeps its own reader, up to four per file, so a file used twice on a timeline doesn't seek on every frame.
-- **[Open]** Hardware decoding through FFmpeg (VA-API, NVDEC), downloading frames into the same planar path, as a step before zero-copy. Scrubbing camera-like long-GOP footage is bound by CPU decoding: a 50 Mbit/s keyframe decodes on one thread in about 50 ms, then about 2.6 ms per frame. It needs two-plane formats (NV12, P010) in the unpack kernel.
+- **[Proposed]** (from the hardware decoding spike, `spikes/vulkan-video`) **Hardware decoding is Vulkan Video, zero-copy, on the engine's own device:**
+  - fw-render creates its wgpu device with the video decode extensions and two extra queues: a decode queue and a compute queue that wgpu never uses, both handed to FFmpeg. It also turns on the two features FFmpeg needs and wgpu leaves off (synchronization2, samplerYcbcrConversion). wgpu 30's device-creation hook does all this; no wgpu patches.
+  - FFmpeg's Vulkan decoder (H.264, HEVC, AV1) decodes into images on that device. Each decoded image becomes a wgpu NV12 or P010 texture that holds a reference to its frame. A barrier moves it out of the decoder's layout, and timeline semaphores order decode, then our reads, then the decoder reusing the image. Pixels never reach the CPU.
+  - One route covers NVIDIA, AMD and Intel. Whatever the hardware can't decode (ProRes, DNxHR, 4:2:2 on many GPUs, adapters with no decode queue such as llvmpipe) takes the software path unchanged.
+  - Hardware frames must be bit-identical to software decoding (H.264 and HEVC decoders are exact by specification), and tests compare them.
+  - A cached hardware frame is VRAM held from the decoder's pool (3 MB at 1080p 8-bit). The pool grows rather than stalling: holding all 239 frames of the test clip at once worked on both GPUs. The frame cache budgets VRAM for them.
+  - The pinned FFmpeg build needs `--enable-vulkan`.
+  - Measured in the spike on the camera-like clip, 1080p H.264 at 50 Mbit/s with 2 s keyframe groups, same harness for both paths:
+
+    | | RTX 4070 | Radeon (Ryzen 7600X integrated) | Software (6 cores, 12 threads) |
+    |---|---|---|---|
+    | Seek to a random frame | 60 ms | 111 ms | 85 ms |
+    | Seek to a keyframe | 15–20 ms | — | 65–80 ms |
+    | Each frame in order, waited on | 2.6 ms | 4.6 ms | 1.4 ms median |
+    | CPU time for a 47-frame seek | 20 ms | — | 1,070 ms |
+
+    The hardware's own decode rate (about 2.6 ms per frame for this bitrate on the 4070) bounds seeking, not the CPU; more decoder threads don't help. Hardware decoding's gain is mostly the CPU it leaves for everything else, plus fast keyframes.
 - **[Decided]** Images: `image`, `exr` (pure Rust), and `rawler` for RAW, with LibRaw bindings if coverage falls short.
 - **[Decided]** Audio decoding through FFmpeg or `symphonia`, `cpal` for output, `rubato` for resampling. Stream audio; never decode whole files into RAM.
-- **[Decided]** Hardware decode: start with CPU decode plus upload. Zero-copy hardware decode (VA-API or NVDEC into wgpu) later; the old prototype showed it needs wgpu patches.
+- **[Decided]** Hardware decode: start with CPU decode plus upload. Zero-copy hardware decode (VA-API or NVDEC into wgpu) later; the old prototype showed it needs wgpu patches. (Superseded by the Vulkan Video proposal above if it's approved: wgpu 30 needs no patches.)
 - **[Decided]** Bounded export queues with byte accounting, and outputs published atomically.
 - **[Decided]** (from step 1) **Outputs are byte-reproducible:** the same pixels always give the same file bytes. EXR is written with increasing line order, because the encoder otherwise writes chunks in thread-completion order.
 
