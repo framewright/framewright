@@ -51,6 +51,8 @@ impl HardwareDevice {
     /// FFmpeg's context for the device, created on first use and shared.
     pub fn new(vulkan: VulkanVideoDevice) -> Result<Arc<HardwareDevice>, String> {
         let mut devices = DEVICES.lock().unwrap_or_else(|e| e.into_inner());
+        // First, so a dead device's handle, which a new device may reuse,
+        // can't match.
         devices.retain(|(_, d)| d.strong_count() > 0);
         if let Some(device) = devices
             .iter()

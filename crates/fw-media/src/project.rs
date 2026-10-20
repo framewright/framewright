@@ -84,10 +84,15 @@ impl ProjectMedia {
         }
     }
 
-    /// Decodes video on the engine's GPU where it can, from now on.
+    /// Decodes video on the engine's GPU where it can, from now on. Meant to
+    /// be called once, after creating the GPU.
     pub fn use_hardware(&mut self, device: fw_compile::VulkanVideoDevice) -> Result<(), String> {
         self.hardware = Some(HardwareDevice::new(device)?);
         self.readers
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.software_only
             .get_mut()
             .unwrap_or_else(|e| e.into_inner())
             .clear();
@@ -329,17 +334,22 @@ impl Decoder for ProjectMedia {
                 }
                 Ok(decoded)
             }
-            // Hardware decoding failed: this file decodes in software from now on.
-            Err(_) if hardware.is_some() => {
-                self.software_only
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(load.path.clone());
+            // Try software. If that works, the failure was the hardware's,
+            // and this file decodes in software from now on; if not, it was
+            // the file's, and the error stands.
+            Err(e) if hardware.is_some() => {
                 self.readers
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(&load.path);
-                self.decode_video(load, &video, frame, None)
+                let decoded = self
+                    .decode_video(load, &video, frame, None)
+                    .map_err(|_| e)?;
+                self.software_only
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(load.path.clone());
+                Ok(decoded)
             }
             Err(e) => Err(e),
         }
