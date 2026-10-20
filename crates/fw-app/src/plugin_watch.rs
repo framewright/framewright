@@ -84,4 +84,20 @@ mod tests {
         std::fs::remove_dir_all(&plugin).unwrap();
         assert!(fingerprint(&folders).is_empty());
     }
+
+    #[test]
+    fn says_when_a_saved_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin = dir.path().join("tint");
+        std::fs::create_dir(&plugin).unwrap();
+        std::fs::write(plugin.join("shader.wgsl"), "return c;").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        watch(vec![dir.path().to_owned()], move || {
+            let _ = tx.send(());
+        });
+        std::thread::sleep(EVERY * 2);
+        assert!(rx.try_recv().is_err(), "nothing changed yet");
+        std::fs::write(plugin.join("shader.wgsl"), "return c * 2.0;").unwrap();
+        assert!(rx.recv_timeout(EVERY * 6).is_ok(), "the change was noticed");
+    }
 }
