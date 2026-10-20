@@ -24,3 +24,10 @@ png = "0.18"
 pollster = "0.4"
 wgpu.workspace = true
 winit.workspace = true
+
+[dev-dependencies]
+egui_kittest = "0.37"
+fw-media.workspace = true
+fw-ops.workspace = true
+fw-testmedia.workspace = true
+tempfile.workspace = true

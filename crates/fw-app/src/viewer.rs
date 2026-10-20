@@ -192,7 +192,7 @@ fn fit(area: Rect, aspect: f32) -> Rect {
 }
 
 /// The start of the frame `seconds` falls in.
-fn frame_start(seconds: f64, rate: Time) -> Time {
+pub fn frame_start(seconds: f64, rate: Time) -> Time {
     let index = (seconds * rate.as_f64()).floor() as i64;
     Time::of_frame(index.max(0), rate).unwrap_or(Time::ZERO)
 }

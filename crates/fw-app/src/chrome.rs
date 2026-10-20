@@ -31,6 +31,8 @@ pub enum AppCommand {
     Quit,
     Undo,
     Redo,
+    /// Removes the selected clip or node.
+    Delete,
     StepBack,
     StepForward,
     GoToStart,
@@ -45,6 +47,8 @@ pub struct TitleBar<'a> {
     pub undo: Option<&'a str>,
     pub redo: Option<&'a str>,
     pub maximised: bool,
+    /// Something is selected that Delete would remove.
+    pub selection: bool,
 }
 
 pub fn title_bar(
@@ -182,6 +186,8 @@ fn menus(ui: &mut Ui, bar: &TitleBar, commands: &mut Vec<AppCommand>) {
             bar.redo.is_some(),
             AppCommand::Redo,
         );
+        ui.separator();
+        item(ui, "Delete", "Del", bar.selection, AppCommand::Delete);
     });
     ui.menu_button(title("Playback"), |ui| {
         ui.set_min_width(220.0);
@@ -216,6 +222,8 @@ pub fn shortcuts(ctx: &egui::Context, commands: &mut Vec<AppCommand>) {
         (Key::ArrowRight, AppCommand::StepForward),
         (Key::Home, AppCommand::GoToStart),
         (Key::End, AppCommand::GoToEnd),
+        (Key::Delete, AppCommand::Delete),
+        (Key::Backspace, AppCommand::Delete),
     ];
     let typing = ctx.egui_wants_keyboard_input();
     ctx.input_mut(|input| {

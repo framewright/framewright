@@ -90,6 +90,34 @@ impl Default for Settings {
     }
 }
 
+/// A media file the document uses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MediaSummary {
+    /// As the document refers to it.
+    pub path: String,
+    /// Empty when the file couldn't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<Picture>,
+    pub has_audio: bool,
+    /// How many nodes use it.
+    pub users: usize,
+    /// Why the file couldn't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Picture {
+    pub width: u32,
+    pub height: u32,
+    /// Frames, for a video; `None` for a still.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frames: Option<u64>,
+    /// The frame rate, for a constant-rate video.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<Time>,
+}
+
 /// The frame to show.
 pub struct ViewerFrame<'a> {
     pub index: i64,
@@ -114,6 +142,10 @@ pub struct Engine {
     events: Vec<Event>,
     gpu: Arc<Gpu>,
     warnings: Vec<String>,
+    /// For looking at media files, apart from the one playback renders with.
+    info: ProjectMedia,
+    /// [`Engine::media`] as of a revision.
+    media: Option<(u64, Vec<MediaSummary>)>,
 }
 
 impl Engine {
@@ -170,6 +202,8 @@ impl Engine {
             events: vec![],
             gpu,
             warnings,
+            info: ProjectMedia::new(folder),
+            media: None,
         })
     }
 
@@ -273,6 +307,16 @@ impl Engine {
         false
     }
 
+    /// The media files the document uses, in the order first used.
+    pub fn media(&mut self) -> &[MediaSummary] {
+        let revision = self.editor.revision();
+        if self.media.as_ref().map(|m| m.0) != Some(revision) {
+            let summaries = summarise_media(self.editor.doc(), &self.info);
+            self.media = Some((revision, summaries));
+        }
+        &self.media.as_ref().expect("just filled").1
+    }
+
     pub fn document(&self) -> &Document {
         self.editor.doc()
     }
@@ -325,6 +369,55 @@ impl Engine {
         self.player.invalidate();
         self.events.push(Event::Document(event));
     }
+}
+
+fn summarise_media(doc: &Document, media: &ProjectMedia) -> Vec<MediaSummary> {
+    use fw_compile::{FrameTimes, MediaResolver};
+    let mut summaries: Vec<MediaSummary> = vec![];
+    let mut nodes: Vec<_> = doc.nodes().collect();
+    // Timeline clips in time order, so the list reads like the edit.
+    let placements = doc.timeline(doc.root()).map(|t| t.clips.clone());
+    nodes.sort_by_key(|(id, _)| placements.as_ref().and_then(|p| p.get(id).map(|p| p.start)));
+    for (_, node) in nodes {
+        let Some(known) = node.as_known() else {
+            continue;
+        };
+        for param in known.params.values() {
+            let fw_doc::Param::Constant(fw_plugin::ParamValue::Media(reference)) = param else {
+                continue;
+            };
+            if reference.path.is_empty() {
+                continue;
+            }
+            if let Some(summary) = summaries.iter_mut().find(|s| s.path == reference.path) {
+                summary.users += 1;
+                continue;
+            }
+            let (picture, has_audio, error) = match media.probe(reference) {
+                Ok(info) => {
+                    let picture = Picture {
+                        width: info.width,
+                        height: info.height,
+                        frames: info.frames.as_ref().map(FrameTimes::count),
+                        rate: match info.frames {
+                            Some(FrameTimes::Constant { rate, .. }) => Some(rate),
+                            _ => None,
+                        },
+                    };
+                    (Some(picture), info.has_audio, None)
+                }
+                Err(e) => (None, false, Some(e)),
+            };
+            summaries.push(MediaSummary {
+                path: reference.path.clone(),
+                picture,
+                has_audio,
+                users: 1,
+                error,
+            });
+        }
+    }
+    summaries
 }
 
 /// Renders frames of the latest document.

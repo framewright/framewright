@@ -4,8 +4,14 @@
 mod app;
 mod capture;
 mod chrome;
+mod controls;
 mod icons;
+mod inspector;
+mod lists;
 mod style;
+#[cfg(test)]
+mod tests;
+mod timeline;
 mod viewer;
 mod window;
 
@@ -36,6 +42,12 @@ struct Args {
     /// frame is ready, and exit.
     #[arg(long)]
     screenshot: Option<PathBuf>,
+    /// Start with the playhead here, in seconds (`1.5` or `3/2`).
+    #[arg(long)]
+    seek: Option<fw_core::Time>,
+    /// Start with this node selected, by id.
+    #[arg(long)]
+    select: Option<fw_core::NodeId>,
     /// The window's size in logical pixels.
     #[arg(long, default_value = "1600x1000", value_parser = parse_size)]
     size: (f64, f64),
@@ -91,8 +103,14 @@ impl ApplicationHandler<UserEvent> for Shell {
             return;
         }
         match self.open(event_loop) {
-            Ok((window, engine)) => {
-                let app = App::new(&engine);
+            Ok((window, mut engine)) => {
+                let mut app = App::new(&engine);
+                app.select(self.args.select);
+                if let Some(time) = self.args.seek
+                    && let Err(e) = engine.request(fw_engine::Request::Seek { time })
+                {
+                    eprintln!("framewright: {e}");
+                }
                 window.window.request_redraw();
                 self.engine = Some(engine);
                 self.running = Some(Running {

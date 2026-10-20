@@ -29,6 +29,16 @@ pub mod tokens {
     pub const ACCENT: Color32 = rgb(0xe8a33d);
     pub const ACCENT_INK: Color32 = rgb(0x1a1408);
     pub const WELL: Color32 = rgb(0x0f0f11);
+    pub const FIELD: Color32 = rgb(0x28282c);
+    pub const TRACK: Color32 = rgb(0x34343a);
+    pub const TRACK_FILL: Color32 = rgb(0x6b6b73);
+    pub const HANDLE: Color32 = rgb(0xd5d5da);
+    pub const LANE_VIDEO: Color32 = rgb(0x1c1c1f);
+    pub const LANE_AUDIO: Color32 = rgb(0x1a1b1d);
+    pub const LANE_LINE: Color32 = rgb(0x26262b);
+    /// Clips on the timeline: fill and border.
+    pub const CLIP_VIDEO: (Color32, Color32) = (rgb(0x3a5577), rgb(0x4d6c93));
+    pub const CLIP_AUDIO: (Color32, Color32) = (rgb(0x2f5238), rgb(0x44704f));
     pub const FIELD_BORDER: Color32 = rgb(0x303036);
     pub const MENU_BG: Color32 = rgb(0x26262a);
     pub const MENU_BORDER: Color32 = rgb(0x3a3a41);

@@ -2,13 +2,25 @@
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Stroke, Ui, vec2};
 use egui_tiles::{TileId, Tiles, Tree};
-use fw_core::Time;
-use fw_engine::{Engine, Request};
+use fw_core::{NodeId, Time};
+use fw_doc::Command;
+use fw_engine::{Engine, MediaSummary, Request};
 
 use crate::chrome::{self, AppCommand, TitleBar, WindowAction, Workspace};
+use crate::controls::Gestures;
 use crate::icons;
+use crate::inspector::{self, Inspector};
+use crate::lists;
 use crate::style::{sans, tokens as t};
+use crate::timeline::{self, TimelineView};
 use crate::viewer::{self, Shown, ViewerState};
+
+/// An edit a panel asks for, sent to the engine as [`Request::Edit`].
+pub struct Edit {
+    pub label: String,
+    pub commands: Vec<Command>,
+    pub gesture: Option<u64>,
+}
 
 /// A panel that can be docked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +116,13 @@ pub struct App {
     /// The last thing that went wrong, shown in the workspace bar.
     message: Option<String>,
     gpu_name: String,
+    /// The node the inspector shows. UI state: selecting isn't an edit.
+    selected: Option<NodeId>,
+    gestures: Gestures,
+    inspector: Inspector,
+    timeline: TimelineView,
+    /// The media the document uses, as of this frame.
+    media: Vec<MediaSummary>,
 }
 
 impl App {
@@ -122,11 +141,28 @@ impl App {
             maximised: false,
             message: None,
             gpu_name: engine.gpu().info.name.clone(),
+            selected: None,
+            gestures: Gestures::default(),
+            inspector: Inspector::default(),
+            timeline: TimelineView::default(),
+            media: vec![],
         }
+    }
+
+    pub fn select(&mut self, node: Option<NodeId>) {
+        self.selected = node;
     }
 
     pub fn ui(&mut self, ui: &mut Ui, engine: &mut Engine) {
         let mut commands = vec![];
+        let mut edits = vec![];
+        self.media = engine.media().to_vec();
+        if self
+            .selected
+            .is_some_and(|id| !engine.document().contains(id))
+        {
+            self.selected = None;
+        }
         if !self.maximised
             && let Some(direction) = chrome::resize_edges(ui.ctx())
         {
@@ -144,6 +180,7 @@ impl App {
             undo: engine.undo_label(),
             redo: engine.redo_label(),
             maximised: self.maximised,
+            selection: self.selected.is_some(),
         };
         egui::Panel::top("title-bar")
             .exact_size(chrome::TITLE_BAR_HEIGHT)
@@ -183,6 +220,7 @@ impl App {
                     app: self,
                     engine,
                     commands: &mut commands,
+                    edits: &mut edits,
                     root: tree.root,
                 };
                 tree.ui(&mut behaviour, ui);
@@ -196,6 +234,14 @@ impl App {
             .any(|a| matches!(a, WindowAction::Resize(_)))
         {
             self.actions.retain(|a| *a != WindowAction::Drag);
+        }
+        for edit in edits {
+            let request = Request::Edit {
+                label: edit.label,
+                commands: edit.commands,
+                gesture: edit.gesture,
+            };
+            self.message = engine.request(request).err().map(|e| e.to_string());
         }
         for command in commands {
             self.run(command, engine);
@@ -223,6 +269,25 @@ impl App {
                 let end = engine.duration().frame_index(rate).unwrap_or(0);
                 Request::Seek {
                     time: frame(end - 1),
+                }
+            }
+            AppCommand::Delete => {
+                let Some(node) = self.selected.take() else {
+                    return;
+                };
+                let doc = engine.document();
+                let is_clip = doc
+                    .timeline(doc.root())
+                    .is_some_and(|t| t.clips.contains_key(&node));
+                Request::Edit {
+                    label: if is_clip {
+                        "Delete Clip"
+                    } else {
+                        "Delete Node"
+                    }
+                    .into(),
+                    commands: vec![Command::RemoveNode { id: node }],
+                    gesture: None,
                 }
             }
             AppCommand::Quit => {
@@ -295,22 +360,10 @@ fn layout(kind: Kind) -> Tree<Pane> {
 
 struct Behaviour<'a> {
     app: &'a mut App,
-    engine: &'a mut Engine,
+    engine: &'a Engine,
     commands: &'a mut Vec<AppCommand>,
+    edits: &'a mut Vec<Edit>,
     root: Option<TileId>,
-}
-
-impl Behaviour<'_> {
-    fn empty(ui: &mut Ui, text: &str) {
-        let rect = ui.max_rect();
-        ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            sans(12.0),
-            t::TEXT3,
-        );
-    }
 }
 
 impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
@@ -333,11 +386,25 @@ impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
                 };
                 viewer::viewer(ui, &state, self.commands);
             }
-            // TODO: the media pool, node list, inspector and timeline.
-            Pane::Media => Self::empty(ui, "No media yet"),
-            Pane::Nodes => Self::empty(ui, "No nodes yet"),
-            Pane::Inspector => Self::empty(ui, "Nothing selected"),
-            Pane::Timeline => Self::empty(ui, "The timeline comes next"),
+            Pane::Media => lists::media(ui, &self.app.media),
+            Pane::Nodes => lists::nodes(ui, self.engine, &mut self.app.selected),
+            Pane::Inspector => inspector::inspector(
+                ui,
+                &mut self.app.inspector,
+                &mut self.app.gestures,
+                self.engine,
+                self.app.selected,
+                self.edits,
+            ),
+            Pane::Timeline => timeline::timeline(
+                ui,
+                &mut self.app.timeline,
+                &mut self.app.gestures,
+                self.engine,
+                &mut self.app.selected,
+                self.edits,
+                self.commands,
+            ),
         }
         egui_tiles::UiResponse::None
     }
@@ -443,6 +510,18 @@ impl egui_tiles::Behavior<Pane> for Behaviour<'_> {
                     .font(crate::style::medium(12.0))
                     .color(t::TEXT_BRIGHT),
             );
+        }
+        if active == Some(Pane::Timeline) {
+            ui.add_space(8.0);
+            let fit = ui.add(egui::Button::new(
+                egui::RichText::new("Zoom to Fit").font(sans(11.0)),
+            ));
+            if fit
+                .on_hover_text("Fit the whole edit in the panel")
+                .clicked()
+            {
+                self.app.timeline.fit();
+            }
         }
     }
 

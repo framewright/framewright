@@ -168,6 +168,22 @@ fn seeking_shows_the_frame_landed_on() {
 }
 
 #[test]
+fn lists_the_media_the_document_uses() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("project.json");
+    let video = fw_testmedia::count_24fps();
+    write_project(&path, &video);
+    let mut engine = open(&path);
+    let media = engine.media();
+    assert_eq!(media.len(), 1);
+    assert_eq!(media[0].path, video.display().to_string());
+    assert_eq!(media[0].users, 1);
+    let picture = media[0].picture.as_ref().expect("readable");
+    assert_eq!((picture.width, picture.height), (64, 32));
+    assert_eq!(picture.rate, Some(Time::from_seconds(24)));
+}
+
+#[test]
 fn requests_and_events_are_plain_data() {
     let request = Request::Edit {
         label: "Opacity".into(),
