@@ -14,7 +14,11 @@ pub struct MediaSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<Picture>,
     pub has_audio: bool,
-    /// How many nodes use it.
+    /// How long it plays: a video's frames or a sound's length. `None` for
+    /// a still.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<Time>,
+    /// How many nodes use it. Media imported but unused has none.
     pub users: usize,
     /// Why the file couldn't be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -34,7 +38,6 @@ pub struct Picture {
 }
 
 pub(crate) fn summarize_media(doc: &Document, media: &ProjectMedia) -> Vec<MediaSummary> {
-    use fw_compile::{FrameTimes, MediaResolver};
     let mut summaries: Vec<MediaSummary> = vec![];
     let mut nodes: Vec<_> = doc.nodes().collect();
     // Timeline clips in time order, so the list reads like the edit.
@@ -51,33 +54,50 @@ pub(crate) fn summarize_media(doc: &Document, media: &ProjectMedia) -> Vec<Media
             if reference.path.is_empty() {
                 continue;
             }
-            if let Some(summary) = summaries.iter_mut().find(|s| s.path == reference.path) {
-                summary.users += 1;
-                continue;
+            match summaries.iter_mut().find(|s| s.path == reference.path) {
+                Some(summary) => summary.users += 1,
+                None => summaries.push(summarize(&reference.path, 1, media)),
             }
-            let (picture, has_audio, error) = match media.probe(reference) {
-                Ok(info) => {
-                    let picture = Picture {
-                        width: info.width,
-                        height: info.height,
-                        frames: info.frames.as_ref().map(FrameTimes::count),
-                        rate: match info.frames {
-                            Some(FrameTimes::Constant { rate, .. }) => Some(rate),
-                            _ => None,
-                        },
-                    };
-                    (Some(picture), info.has_audio, None)
-                }
-                Err(e) => (None, false, Some(e)),
-            };
-            summaries.push(MediaSummary {
-                path: reference.path.clone(),
-                picture,
-                has_audio,
-                users: 1,
-                error,
-            });
+        }
+    }
+    // Then what's imported but not used yet.
+    for path in doc.media_pool() {
+        if !summaries.iter().any(|s| s.path == path) {
+            summaries.push(summarize(path, 0, media));
         }
     }
     summaries
+}
+
+fn summarize(path: &str, users: usize, media: &ProjectMedia) -> MediaSummary {
+    use fw_compile::{FrameTimes, MediaResolver};
+    let reference = fw_plugin::MediaRef { path: path.into() };
+    let (picture, has_audio, duration, error) = match media.probe(&reference) {
+        Ok(info) => {
+            let picture = (info.width > 0).then(|| Picture {
+                width: info.width,
+                height: info.height,
+                frames: info.frames.as_ref().map(FrameTimes::count),
+                rate: match info.frames {
+                    Some(FrameTimes::Constant { rate, .. }) => Some(rate),
+                    _ => None,
+                },
+            });
+            let duration = match &info.frames {
+                Some(frames) => frames.duration(),
+                None if info.has_audio => fw_media::audio_duration(&info.path).ok().flatten(),
+                None => None,
+            };
+            (picture, info.has_audio, duration, None)
+        }
+        Err(e) => (None, false, None, Some(e)),
+    };
+    MediaSummary {
+        path: path.into(),
+        picture,
+        has_audio,
+        duration,
+        users,
+        error,
+    }
 }

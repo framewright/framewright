@@ -13,7 +13,9 @@
 
 mod frames;
 mod media;
+mod paths;
 mod sound;
+mod thumbnails;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -31,6 +33,8 @@ use serde::{Deserialize, Serialize};
 
 pub use fw_ops::{PluginProblem, plugin_folders};
 pub use media::{MediaSummary, Picture};
+pub use paths::create_project;
+pub use thumbnails::{THUMBNAIL_WIDTH, Thumbnail};
 
 use crate::frames::{Edited, Latest, SharedLatest};
 use crate::sound::Sound;
@@ -64,6 +68,12 @@ pub enum Request {
     Pause,
     /// Writes the document to its file.
     Save,
+    /// Writes the document to a new file and carries on with that one. In
+    /// another folder, media paths are rewritten to suit it and the project
+    /// opens again from there, starting a new undo history.
+    SaveAs {
+        path: PathBuf,
+    },
     /// Reads the plugin folders again and renders with what's there now, as
     /// after an edit.
     ReloadPlugins,
@@ -188,6 +198,7 @@ pub struct Engine {
     info: ProjectMedia,
     /// [`Engine::media`] as of a revision.
     media: Option<(u64, Vec<MediaSummary>)>,
+    thumbnails: thumbnails::Thumbnails,
 }
 
 impl Engine {
@@ -254,6 +265,7 @@ impl Engine {
             warnings,
             info: ProjectMedia::new(folder),
             media: None,
+            thumbnails: thumbnails::Thumbnails::new(),
         })
     }
 
@@ -310,6 +322,7 @@ impl Engine {
                     path: self.path.clone(),
                 });
             }
+            Request::SaveAs { path } => self.save_as(&path)?,
             Request::ReloadPlugins => self.reload_plugins(),
         }
         Ok(())
@@ -420,6 +433,27 @@ impl Engine {
         self.editor.doc()
     }
 
+    /// The thumbnail of a media file, named as the document names it. `None`
+    /// while it's being made, and for files without a picture.
+    pub fn thumbnail(&self, media: &str) -> Option<Arc<Thumbnail>> {
+        let path = self
+            .info
+            .resolve(&fw_plugin::MediaRef { path: media.into() });
+        self.thumbnails.get(&path)
+    }
+
+    /// Whether thumbnails asked for are still being made, so the caller
+    /// knows to look again.
+    pub fn thumbnails_pending(&self) -> bool {
+        self.thumbnails.pending()
+    }
+
+    /// How the document should refer to `file`: relative to the project's
+    /// folder, so the project and its media can move together.
+    pub fn media_reference(&self, file: &Path) -> String {
+        paths::reference(file, self.path.parent().unwrap_or(Path::new(".")))
+    }
+
     pub fn registry(&self) -> &Arc<Registry> {
         self.editor.registry()
     }
@@ -473,6 +507,29 @@ impl Engine {
         }
         self.media = None;
         self.events.push(Event::Document(event));
+    }
+
+    fn save_as(&mut self, path: &Path) -> Result<(), EngineError> {
+        let save_error = |source| EngineError::Save {
+            path: path.to_owned(),
+            source,
+        };
+        let old = self.path.parent().unwrap_or(Path::new("."));
+        let new = path.parent().unwrap_or(Path::new("."));
+        if paths::same_folder(old, new) {
+            self.path = path.to_owned();
+            return self.request(Request::Save);
+        }
+        let mut doc = self.editor.doc().clone();
+        for command in paths::rebase(&doc, old, new) {
+            command.apply(&mut doc, self.editor.registry())?;
+        }
+        fw_doc::save::save(&doc, path).map_err(save_error)?;
+        *self = Engine::open(path, self.gpu.clone(), self.settings.clone())?;
+        self.events.push(Event::Saved {
+            path: path.to_owned(),
+        });
+        Ok(())
     }
 
     // TODO: nodes that loaded as unknown because their plugin was missing stay

@@ -61,6 +61,22 @@ impl FrameTimes {
             FrameTimes::Variable(times) => times.get(index as usize).copied(),
         }
     }
+
+    /// How long the frames play, from source time 0 to the end of the last
+    /// frame. A variable-rate last frame lasts as long as the average frame.
+    pub fn duration(&self) -> Option<Time> {
+        match self {
+            FrameTimes::Constant { start, rate, count } => start
+                .checked_add(Time::of_frame(*count as i64, *rate).ok()?)
+                .ok(),
+            FrameTimes::Variable(times) => {
+                let (first, last) = (*times.first()?, *times.last()?);
+                let gaps = Time::from_seconds(times.len().saturating_sub(1).max(1) as i64);
+                let average = last.checked_sub(first).ok()?.checked_div(gaps).ok()?;
+                last.checked_add(average).ok()
+            }
+        }
+    }
 }
 
 #[cfg(test)]

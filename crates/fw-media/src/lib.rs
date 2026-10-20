@@ -14,7 +14,7 @@ mod hardware;
 mod project;
 mod video;
 
-pub use audio::{AudioReader, CHANNELS, has_audio};
+pub use audio::{AudioReader, CHANNELS, audio_duration, has_audio};
 
 pub use video::{VideoInfo, VideoReader, probe_video};
 

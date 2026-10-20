@@ -430,3 +430,92 @@ fn reloading_plugins_renders_with_the_new_shader() {
         engine.failure()
     );
 }
+
+fn quiet() -> Settings {
+    Settings {
+        editing_copies: false,
+        sound: false,
+        ..Settings::default()
+    }
+}
+
+#[test]
+fn a_new_project_takes_imported_media_and_saves_as_elsewhere() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("first/project.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let settings = TimelineSettings {
+        width: 320,
+        height: 180,
+        rate: Time::from_seconds(24),
+        sample_rate: 48000,
+    };
+    fw_engine::create_project(&path, settings).unwrap();
+    let gpu = Arc::new(Gpu::new().unwrap());
+    let mut engine = Engine::open(&path, gpu, quiet()).unwrap();
+    let doc = engine.document();
+    let tracks = &doc.timeline(doc.root()).unwrap().tracks;
+    assert_eq!(tracks.len(), 2, "a video track and an audio track");
+
+    // Media beside the project is referred to relatively.
+    let video = path.parent().unwrap().join("count.mp4");
+    std::fs::copy(fw_testmedia::count_24fps(), &video).unwrap();
+    let reference = engine.media_reference(&video);
+    assert_eq!(reference, "count.mp4");
+    engine
+        .request(Request::Edit {
+            label: "Import".into(),
+            commands: vec![Command::AddMedia {
+                path: reference.clone(),
+            }],
+            gesture: None,
+        })
+        .unwrap();
+    let media = engine.media().to_vec();
+    assert_eq!(media.len(), 1);
+    assert_eq!(media[0].users, 0, "imported, not used yet");
+    assert_eq!(media[0].duration, Some(Time::from_seconds(2)));
+    assert_eq!(media[0].error, None);
+
+    // Its thumbnail arrives from the thumbnail thread.
+    assert_eq!(engine.thumbnail(&reference), None);
+    let end = std::time::Instant::now() + Duration::from_secs(20);
+    while engine.thumbnails_pending() && std::time::Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let thumbnail = engine.thumbnail(&reference).expect("a thumbnail");
+    let picture = media[0].picture.as_ref().unwrap();
+    assert_eq!(
+        thumbnail.width,
+        picture.width.min(fw_engine::THUMBNAIL_WIDTH),
+        "small media isn't enlarged"
+    );
+    assert_eq!(
+        thumbnail.rgba.len(),
+        (thumbnail.width * thumbnail.height * 4) as usize
+    );
+
+    // Saving in the same folder keeps the undo history.
+    let renamed = path.parent().unwrap().join("renamed.json");
+    engine
+        .request(Request::SaveAs {
+            path: renamed.clone(),
+        })
+        .unwrap();
+    assert_eq!(engine.path(), renamed);
+    assert_eq!(engine.undo_label(), Some("Import"));
+
+    // Elsewhere, the media path is rewritten to still find the file.
+    let moved = dir.path().join("second/deeper/project.json");
+    std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
+    engine
+        .request(Request::SaveAs {
+            path: moved.clone(),
+        })
+        .unwrap();
+    assert_eq!(engine.path(), moved);
+    let pool: Vec<String> = engine.document().media_pool().map(String::from).collect();
+    assert_eq!(pool, ["../../first/count.mp4"]);
+    assert_eq!(engine.media()[0].error, None);
+    assert!(!engine.is_modified());
+}

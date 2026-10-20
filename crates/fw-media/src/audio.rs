@@ -44,6 +44,27 @@ pub fn has_audio(path: &Path) -> Result<bool, MediaError> {
         .is_some())
 }
 
+/// How long a file's sound lasts, as its container says, or `None` when it
+/// doesn't say.
+pub fn audio_duration(path: &Path) -> Result<Option<Time>, MediaError> {
+    let err = decode_error(path);
+    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+        .map_err(|_| err("path contains a NUL byte".into()))?;
+    let input = AVFormatContextInput::open(&c_path).map_err(|e| err(e.to_string()))?;
+    let (stream, _) = input
+        .find_best_stream(ffi::AVMEDIA_TYPE_AUDIO)
+        .map_err(|e| err(e.to_string()))?
+        .ok_or_else(|| err("no audio stream".into()))?;
+    let s = &input.streams()[stream];
+    let from_stream = (s.duration != ffi::AV_NOPTS_VALUE && s.duration > 0)
+        .then(|| Time::new(s.duration * s.time_base.num as i64, s.time_base.den as i64).ok())
+        .flatten();
+    let from_container = (input.duration != ffi::AV_NOPTS_VALUE && input.duration > 0)
+        .then(|| Time::new(input.duration, ffi::AV_TIME_BASE as i64).ok())
+        .flatten();
+    Ok(from_stream.or(from_container))
+}
+
 /// Streams one file's audio. Not `Send`: create it on the thread that reads it.
 pub struct AudioReader {
     path: PathBuf,
